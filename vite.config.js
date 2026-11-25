@@ -1,12 +1,13 @@
 import { defineConfig } from 'vite';
-import { apiMiddleware, startScheduler, stopScheduler } from './server/api.js';
-import { setPort } from './server/cluster.js';
 
 const publicHost = (() => { try { return process.env.PUBLIC_URL ? new URL(process.env.PUBLIC_URL).hostname : null; } catch { return null; } })();
 const allowedHosts = ['.trycloudflare.com', ...(publicHost ? [publicHost] : [])];
 
 // The API, SQLite database and 60-minute batch updater run inside Vite's dev/preview server.
-const mount = server => {
+// They are loaded only here, not at the top of this file: `vite build` (e.g. on Vercel) must not open the database.
+const mount = async server => {
+  const {apiMiddleware, startScheduler, stopScheduler} = await import('./server/api.js');
+  const {setPort} = await import('./server/cluster.js');
   server.middlewares.use(apiMiddleware());
   // The node's address for the Nodes page (port known once the server listens).
   const hs = server.httpServer, port = () => { const a = hs?.address(); if (a && typeof a === 'object') setPort(a.port, /^(127\.|::1$|::ffff:127\.)/.test(a.address)); };
