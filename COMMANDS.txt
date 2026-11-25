@@ -1,0 +1,154 @@
+CHANNEL STUDIO - YOUTUBE DASHBOARD: COMMANDS
+=============================================
+Run every command from this folder (youtube-dashboard).
+Requires Node.js 22.13 or newer.
+
+
+FIRST-TIME SETUP
+----------------
+npm install                    Install dependencies (once, or after updating the project)
+
+
+START THE DASHBOARD
+-------------------
+npm run dev                    Development mode, this computer only
+                               -> http://localhost:5173
+                               Reloads automatically when files change.
+
+npm run dev -- --host          Development mode, also reachable on your local network
+                               -> http://<this-pc-ip>:5173
+
+npm run serve                  Production build, this computer only
+                               -> http://localhost:4173
+
+npm run serve:lan              Production build, reachable on your local network
+                               -> http://localhost:4173 and http://<this-pc-ip>:4173
+                               (This is what auto-start uses.)
+
+npm run build                  Build only (output goes to dist/), without starting a server
+
+To stop a server: press Ctrl+C in its terminal.
+
+npm run stop                   Stop ALL running dashboard servers (ports 4173 and 5173),
+                               including the background auto-start one.
+
+Note: "serve" and "serve:lan" load the server code once at start.
+After updating the project, stop and start them again.
+
+
+AUTO-START (start when you sign in)
+-----------------------------------
+npm run autostart:install      Install auto-start and start the server now
+                               (run "npm run stop" first if a server is already running)
+                               (runs serve:lan in the background, port 4173)
+npm run autostart:status       Check whether auto-start is installed
+npm run autostart:uninstall    Remove auto-start
+
+Windows: shortcut in the Startup folder, runs with no window.
+macOS:   LaunchAgent (restarts it if it crashes).
+Linux:   XDG autostart entry.
+Background server log: data/server.log
+
+
+FINDING THIS PC'S NETWORK ADDRESS
+---------------------------------
+Windows:  ipconfig              (look for "IPv4 Address", e.g. 192.168.1.16)
+macOS:    ipconfig getifaddr en0
+Linux:    hostname -I
+
+Other devices must be on the same Wi-Fi/network.
+If they can't connect, allow Node.js on private networks in your firewall.
+Anyone on the network can open the dashboard, so use it only on trusted networks.
+
+
+DATA AND BACKUPS
+----------------
+data/dashboard.db              All history, rankings, settings (SQLite).
+data/backups/                  Automatic daily backups (last 14 days kept).
+                               Settings -> Backups: "Back up now", and an optional
+                               second folder (e.g. a Google Drive folder).
+If the database is ever damaged, the dashboard moves it aside on start and
+restores the newest backup automatically.
+To restore by hand: npm run stop, copy a file from data/backups over
+data/dashboard.db, then start again.
+
+
+IN THE DASHBOARD
+----------------
+Ctrl+K  (Cmd+K on Mac)         Search pages, channels, videos, budgets
+"Update now" button            Refresh all channels immediately
+Rankings -> "Check <category> now"   Re-check the open category's searches
+Settings                       Discord/Slack webhooks, digest, compact mode
+
+
+EXACT UPLOAD DATES (CHROME EXTENSION)
+-------------------------------------
+YouTube's channel pages only show "3 weeks ago" (and no date for Shorts).
+The extension in the "extension" folder reads each video's exact date
+from its own page in your browser and sends it to the dashboard.
+
+Install (once):
+  1. Open chrome://extensions in Chrome
+  2. Turn on "Developer mode" (top right)
+  3. Click "Load unpacked" and choose the youtube-dashboard/extension folder
+  4. Click the extension icon. The default dashboard address is http://localhost:4173.
+     If the dashboard runs on another PC, enter e.g. http://192.168.1.16:4173 and allow access.
+
+It checks about 8 videos a minute while Chrome is open, pauses for 30 minutes
+if YouTube asks it to slow down, and does each video only once.
+The dashboard must be running (npm run serve:lan or auto-start).
+
+
+CLOUD DATABASE (TURSO)
+----------------------
+The dashboard uses the Turso database named in .env (DATABASE_URL + DATABASE_TOKEN).
+Remove or empty DATABASE_URL in .env to go back to the local file data/dashboard.db.
+Restart the server after changing .env (npm run stop, then npm run autostart:install).
+
+  npm run db:check              Test the connection, writes and speed (safe, cleans up after itself)
+
+Optional: add TURSO_API_TOKEN=... (Turso > Settings > API Tokens) to .env to see
+this month's usage against the free plan on the Database page.
+
+data/replica.db is this PC's local copy of the cloud database (reads come from it).
+It can be deleted while the server is stopped; it is downloaded again on start.
+Keep .env private: the token gives full access to the database.
+
+
+NODES (SEVERAL PCs SHARING THE WORK)
+------------------------------------
+Every server using the cloud database is a "node". Nodes send a heartbeat every
+15 seconds; the Nodes page shows them all. Ranking budgets are shared out between
+active nodes (one node per budget at a time), the hourly update runs on one node,
+and if a node stops, its work moves to another one automatically.
+
+  npm run node                  Build and start a node (no Vite; listens on all networks)
+  npm run node:start            Start a node using the existing build
+
+A node reads these from its .env:
+  DATABASE_URL, DATABASE_TOKEN  Same as this PC (required, shared database)
+  NODE_NAME                     Name on the Nodes page (default: the PC name)
+  PORT                          Default 4173
+  PUBLIC_URL                    Optional address others use (e.g. a tunnel URL)
+
+On the Nodes page: Drain = finish the current job and take no new ones,
+Disable = stop now and hand the job to another node, Resume = back to work,
+Remove = forget an offline node.
+
+
+VERCEL (OPEN THE DASHBOARD FROM ANYWHERE)
+-----------------------------------------
+The page is hosted on Vercel; it signs you in and then talks to your nodes directly,
+using the fastest one that answers. Each node gets a public https address from a free
+Cloudflare quick tunnel (TUNNEL=quick in .env, needs cloudflared installed):
+
+  winget install --id Cloudflare.cloudflared     Install cloudflared (once per PC)
+
+Nodes only accept requests from the internet with a valid sign-in pass (signed with
+AUTH_SECRET). This PC and your home network can use http://<pc-ip>:4173 as before.
+
+Vercel environment variables: DASHBOARD_PASSWORD, AUTH_SECRET (same as .env),
+DATABASE_URL, DATABASE_TOKEN (a read-only Turso token is enough).
+
+  npx vercel login              Sign in to Vercel (once)
+  npx vercel --prod             Deploy (run in the youtube-dashboard folder)

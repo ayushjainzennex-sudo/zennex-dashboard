@@ -1,0 +1,14 @@
+# Never upload secrets, the database or local copies.
+.env
+.env.*
+!.env.example
+data
+node_modules
+dist
+legacy
+extension
+scripts
+Trade_Gothic
+helvetica-255 (1)
+COMMANDS.txt
+skills-lock.json

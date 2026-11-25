@@ -1,0 +1,20 @@
+node_modules/
+/dist/
+
+# Your data and secrets never go to git
+/data/
+.env
+.env.*
+!.env.example
+*.db
+*.db-*
+.vercel/
+
+# Commercial fonts (not used by the app; their licences usually forbid sharing)
+/Trade_Gothic/
+/helvetica-255 (1)/
+
+# OS / editor clutter
+.DS_Store
+Thumbs.db
+*.log

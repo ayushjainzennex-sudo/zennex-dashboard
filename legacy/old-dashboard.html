@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>YouTube Dashboard</title>
+<style>
+:root{color-scheme:dark;--bg:#101114;--panel:#191b20;--line:#2b2e36;--muted:#a5a8b4;--accent:#ff645f}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:#f5f5f7;font:15px system-ui,sans-serif}main{max-width:1200px;margin:auto;padding:26px clamp(16px,4vw,52px) 60px}header,.heading,.row{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}header{border-bottom:1px solid var(--line);padding-bottom:20px}.brand{font-weight:750;font-size:17px}.mark{color:var(--accent);margin-right:8px}h1{font-size:clamp(32px,5vw,55px);letter-spacing:-.055em;margin:30px 0 5px}h2{font-size:21px;margin:0}p{color:var(--muted);margin:5px 0 17px}button,input,select{font:inherit;border:1px solid var(--line);border-radius:9px;background:#24262e;color:inherit;padding:9px 12px}button{cursor:pointer}button:hover{border-color:var(--accent)}button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.accent{background:var(--accent);color:#191113;font-weight:750;border-color:transparent}.tabs{display:flex;gap:8px;flex-wrap:wrap;margin:20px 0}.tabs [aria-pressed=true]{border-color:var(--accent);color:#ffa39f;background:#322125}.metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:12px}.card,.panel{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:17px}.card small,.muted{color:var(--muted)}.card strong{display:block;font-size:27px;margin-top:6px}.panel{margin-top:16px}.table{overflow:auto}table{width:100%;border-collapse:collapse;text-align:left;white-space:nowrap;margin-top:12px}th,td{padding:12px 9px;border-bottom:1px solid var(--line)}th{color:var(--muted);font-size:13px}tbody tr:last-child td{border:0}.badge{border-radius:20px;padding:5px 10px;background:#322125;color:#ffa39f;font-size:12px}.dot{display:inline-block;background:var(--dot);width:9px;height:9px;border-radius:50%;margin-right:8px}.bars{display:grid;gap:12px;margin-top:15px}.bar{display:grid;grid-template-columns:minmax(70px,110px) 1fr minmax(60px,auto);align-items:center;gap:12px}.track{height:10px;border-radius:12px;background:#292c33;overflow:hidden}.fill{height:100%;border-radius:12px;background:var(--dot)}dialog{width:min(94vw,630px);max-height:88vh;overflow:auto;border:1px solid var(--line);border-radius:15px;background:var(--panel);color:inherit;padding:22px}dialog::backdrop{background:#000a}fieldset{border:1px solid var(--line);border-radius:10px;margin:14px 0;padding:12px}.fields{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px}label{display:grid;gap:4px;font-size:13px;color:var(--muted)}label input,label select{width:100%}.actions{display:flex;gap:8px;justify-content:flex-end;margin-top:14px}.error{color:#ffa39f;margin-top:12px}.empty{padding:16px 0;color:var(--muted)}
+</style>
+<main><header><div class="brand"><span class="mark" aria-hidden="true">▶</span>YouTube Dashboard</div><button id="settingsButton">Edit channels &amp; stats</button></header>
+<h1>Channel overview</h1><p>Track performance and plan uploads across your three channels.</p>
+<div class="tabs" id="tabs" aria-label="Filter by channel"></div><div id="message" role="status" class="error"></div>
+<div class="metrics" id="metrics"></div>
+<section class="panel"><div class="heading"><h2>Views by channel</h2><span id="dataLabel" class="badge"></span></div><div class="bars" id="bars"></div></section>
+<section class="panel"><div class="heading"><h2>Upload planner</h2><button id="add" class="accent">+ Add video</button></div><div id="videos"></div></section>
+</main>
+<dialog id="settings"><form id="channelForm"><h2>Edit channels &amp; stats</h2><p>Enter subscriber counts and use the same reporting period for views, watch hours, and new subscribers across all three channels.</p><label>Reporting period<input name="period" required maxlength="50"></label><div id="channelFields"></div><div class="actions"><button type="button" data-close>Cancel</button><button class="accent">Save stats</button></div></form></dialog>
+<dialog id="videoDialog"><form id="videoForm"><h2 id="videoHeading">Add video</h2><p>Track Shorts and long-form videos from idea to publish.</p><div class="fields"><label>Title<input name="title" required maxlength="150"></label><label>Channel<select name="channel"></select></label><label>Format<select name="format"><option>Long-form</option><option>Short</option></select></label><label>Status<select name="status"><option>Idea</option><option>In production</option><option>Scheduled</option><option>Published</option></select></label><label>Publish date<input name="date" type="date"></label></div><div class="actions"><button id="remove" type="button">Delete video</button><button type="button" data-close>Cancel</button><button class="accent">Save video</button></div></form></dialog>
+<script>
+const byId = id => document.getElementById(id);
+const settings = byId('settings'), videoDialog = byId('videoDialog');
+const channelForm = byId('channelForm'), videoForm = byId('videoForm');
+const storageKey = 'youtube-dashboard-v1';
+const colors = ['#ff645f', '#8f9cff', '#59d9b1'];
+const formatter = new Intl.NumberFormat('en-IN', {maximumFractionDigits: 2});
+const definitions = [['subscribers','Total subscribers'],['views','Views'],['hours','Watch hours'],['gained','New subscribers']];
+const initial = {
+  period:'Last 28 days', demo:true,
+  channels:[
+    {name:'Channel 1', subscribers:28400, views:168200, hours:6200, gained:840},
+    {name:'Channel 2', subscribers:14200, views:98700, hours:3400, gained:390},
+    {name:'Channel 3', subscribers:8100, views:52300, hours:1600, gained:210}
+  ],
+  videos:[]
+};
+let state = initial;
+try {
+  const saved = localStorage.getItem(storageKey);
+  if (saved) state = JSON.parse(saved);
+} catch { byId('message').textContent = 'Saved data could not be loaded.'; }
+let active = -1;
+let editing = null;
+const escape = value => String(value).replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
+const number = value => formatter.format(value);
+const dot = index => '<span class="dot" style="--dot:'+colors[index]+'" aria-hidden="true"></span>';
+
+function save(next) {
+  try {
+    localStorage.setItem(storageKey, JSON.stringify(next));
+    byId('message').textContent = '';
+  } catch {
+    byId('message').textContent = 'Browser storage is unavailable. Changes will last until you close or reload this page.';
+  }
+  state = next;
+  render();
+}
+
+function render() {
+  const indices = active < 0 ? [0,1,2] : [active];
+  byId('tabs').innerHTML = [-1,0,1,2].map(index =>
+    '<button data-channel="'+index+'" aria-pressed="'+(index === active)+'">'+
+    (index < 0 ? 'All channels' : dot(index)+escape(state.channels[index].name))+'</button>'
+  ).join('');
+  byId('dataLabel').textContent = (state.demo ? 'Sample data · ' : 'Manual entry · ')+state.period;
+  byId('metrics').innerHTML = definitions.map(([key,label]) => {
+    const total = indices.reduce((sum,index) => sum+state.channels[index][key],0);
+    return '<article class="card"><small>'+label+'</small><strong>'+number(total)+'</strong></article>';
+  }).join('');
+  const max = Math.max(1,...state.channels.map(channel => channel.views));
+  byId('bars').innerHTML = indices.map(index => {
+    const channel = state.channels[index];
+    return '<div class="bar"><span>'+dot(index)+escape(channel.name)+'</span><div class="track" aria-hidden="true"><div class="fill" style="--dot:'+colors[index]+';width:'+100*channel.views/max+'%"></div></div><strong>'+number(channel.views)+'</strong></div>';
+  }).join('');
+  const videos = state.videos.filter(video => active < 0 || video.channel === active)
+    .sort((left,right) => (left.date || '9999').localeCompare(right.date || '9999'));
+  byId('videos').innerHTML = videos.length ? '<div class="table"><table><thead><tr><th>Video</th><th>Channel</th><th>Format</th><th>Status</th><th>Publish date</th><th>Action</th></tr></thead><tbody>'+
+    videos.map(video => '<tr><td>'+escape(video.title)+'</td><td>'+dot(video.channel)+escape(state.channels[video.channel].name)+'</td><td>'+escape(video.format)+'</td><td>'+escape(video.status)+'</td><td>'+escape(video.date || '—')+'</td><td><button data-edit="'+escape(video.id)+'" aria-label="Edit '+escape(video.title)+'">Edit</button></td></tr>').join('')+
+    '</tbody></table></div>' : '<div class="empty">No videos in this view. Add a video to start planning.</div>';
+}
+
+byId('tabs').addEventListener('click', event => {
+  const button = event.target.closest('button[data-channel]');
+  if (!button) return;
+  active = Number(button.dataset.channel);
+  render();
+  byId('tabs').querySelector('[aria-pressed=true]').focus();
+});
+byId('settingsButton').onclick = () => {
+  channelForm.elements.period.value = state.period;
+  byId('channelFields').innerHTML = state.channels.map((channel,index) =>
+    '<fieldset><legend>Channel '+(index+1)+'</legend><div class="fields"><label>Channel name<input required maxlength="50" name="name'+index+'" value="'+escape(channel.name)+'"></label>'+
+    definitions.map(([key,label]) => '<label>'+label+'<input type="number" min="0" max="999999999999" step="'+(key==='hours'?'0.01':'1')+'" required name="'+key+index+'" value="'+(state.demo?'':channel[key])+'"></label>').join('')+
+    '</div></fieldset>'
+  ).join('');
+  settings.showModal();
+};
+channelForm.onsubmit = event => {
+  event.preventDefault();
+  const values = new FormData(channelForm);
+  const period = String(values.get('period')).trim();
+  const channels = state.channels.map((_,index) => Object.fromEntries([
+    ['name',String(values.get('name'+index)).trim()],
+    ...definitions.map(([key]) => [key,Number(values.get(key+index))])
+  ]));
+  if (!period || channels.some(channel => !channel.name)) {
+    alert('Enter a reporting period and a name for each channel.');
+    return;
+  }
+  save({...state, channels, period, demo:false});
+  settings.close();
+};
+function openVideo(video) {
+  editing = video?.id ?? null;
+  videoForm.reset();
+  videoForm.elements.channel.replaceChildren(...state.channels.map((channel,index) => new Option(channel.name,index)));
+  videoForm.elements.channel.value = video?.channel ?? Math.max(0,active);
+  for (const key of ['title','format','status','date']) {
+    if (video) videoForm.elements[key].value = video[key];
+  }
+  byId('videoHeading').textContent = editing ? 'Edit video' : 'Add video';
+  byId('remove').hidden = !editing;
+  videoDialog.showModal();
+}
+byId('add').onclick = () => openVideo();
+byId('videos').onclick = event => {
+  const button = event.target.closest('[data-edit]');
+  if (button) openVideo(state.videos.find(video => video.id === button.dataset.edit));
+};
+videoForm.onsubmit = event => {
+  event.preventDefault();
+  const video = Object.fromEntries(new FormData(videoForm));
+  video.title = video.title.trim();
+  if (!video.title) { alert('Enter a video title.'); return; }
+  video.channel = Number(video.channel);
+  video.id = editing ?? (Date.now().toString(36)+'-'+Math.random().toString(36).slice(2));
+  save({...state, videos:editing ? state.videos.map(previous => previous.id === editing ? video : previous) : [...state.videos,video]});
+  videoDialog.close();
+};
+byId('remove').onclick = () => {
+  if (!editing || !confirm('Delete this video from the planner?')) return;
+  save({...state,videos:state.videos.filter(video => video.id !== editing)});
+  videoDialog.close();
+};
+document.querySelectorAll('[data-close]').forEach(button => {
+  button.onclick = () => button.closest('dialog').close();
+});
+render();
+</script></html>
