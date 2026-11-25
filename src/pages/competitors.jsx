@@ -4,7 +4,6 @@ import {Avatar, ChannelCard, ChannelSelect, ComparisonTable, OutlierCard, ScoreC
 function Competitors({owner, own, competitors, open, onAdd, onUnlink, onPlan}) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  const maxViews = Math.max(1, ...competitors.map(c => c.totalViews || 0));
   async function add(event) {
     event.preventDefault();
     const form = event.currentTarget;
@@ -24,7 +23,7 @@ function Competitors({owner, own, competitors, open, onAdd, onUnlink, onPlan}) {
       {competitors.length > 0 && <div className="tags">{competitors.map(c => <span className="tag-chip" key={c.id}><Avatar channel={c} size={18}/>{c.name}<button aria-label={'Remove '+c.name+' from '+owner.name} title={'Remove from '+owner.name} onClick={() => onUnlink(c)}>×</button></span>)}</div>}
     </section>
     {competitors.length ? <>
-      <section className="channel-cards">{competitors.map(c => <ChannelCard key={c.id} c={c} open={open} maxViews={maxViews}/>)}</section>
+      <section className="channel-cards">{competitors.map(c => <ChannelCard key={c.id} c={c} open={open}/>)}</section>
       <section className="card">
         <div className="card-head"><h2>{owner.name} vs competitors</h2><span className="muted">Ranked by subscribers</span></div>
         <ComparisonTable channels={[owner, ...competitors].sort((a,b) => (b.subscribers||0) - (a.subscribers||0))} open={open}/>

@@ -4,7 +4,6 @@ import {ChannelCard, ComparisonTable, DAY, Delta, Kpi, LaunchTracker, OutlierCar
 function Overview({own, open, rail}) {
   const total = f => own.reduce((s,c) => s + (c[f] || 0), 0);
   const totalDelta = f => own.some(c => c.deltas.week) ? own.reduce((s,c) => s + (c.deltas.week?.[f] || 0), 0) : null;
-  const maxViews = Math.max(1, ...own.map(c => c.totalViews || 0));
   const latest = own.flatMap(c => c.recent.map(v => ({...v, ch:c}))).sort((a,b) => new Date(b.published) - new Date(a.published)).slice(0, 8);
   const trending = own.flatMap(c => stats(c).trending.map(v => ({...v, ch:c}))).sort((a,b) => b.perHour - a.perHour).slice(0, 5);
   const weekUploads = own.reduce((s,c) => s + (c.periods?.[0]?.uploads ?? c.recent.filter(v => Date.now() - new Date(v.published) < 7*DAY).length), 0);
@@ -16,7 +15,7 @@ function Overview({own, open, rail}) {
       <Kpi label="Videos published" value={fmt(total('videoCount'))} sub="lifetime"/>
       <Kpi label="Uploads, last 7 days" value={fmt(weekUploads)} sub={short(weekViews)+' views on them so far'}/>
     </section>
-    <section className="channel-cards">{own.map(c => <ChannelCard key={c.id} c={c} open={open} maxViews={maxViews}/>)}</section>
+    <section className="channel-cards">{own.map(c => <ChannelCard key={c.id} c={c} open={open}/>)}</section>
     <div className="split">
       <section className="card">
         <div className="card-head"><h2>Latest uploads</h2><span className="muted">All channels</span></div>

@@ -3,6 +3,8 @@ import {createRoot} from 'react-dom/client';
 import '@fontsource-variable/inter';
 import './style.css';
 import {Icon, Logo} from './icons.jsx';
+import {installGlass} from './glass.js';
+import {installSeg} from './seg.js';
 import {REMOTE, nodeFetch, onChange, state as remoteState, signIn, signOut, refreshNodes} from './remote.js';
 import {Avatar, ConfirmHost, DAY, PageSkeleton, ToastHost, ago, api, applyDensity, avatarAt, fmt, fresh, key, pref, reduceMotion, setPref, short, shortDate, thumbProps, toast, today, yt} from './shared.jsx';
 import {Overview} from './pages/overview.jsx';
@@ -106,7 +108,7 @@ function OverviewRail({data, own, competitors, open, onRefresh, onSearch}) {
         {dates && <li><span>Exact upload dates</span><span className="muted">{dates.remaining ? dates.remaining+' left · '+dates.done+' done' : 'all exact'}</span></li>}
       </ul>
       <div className="rail-actions">
-        <button className="btn primary" onClick={onRefresh} disabled={st.running}>{st.running ? <span className="spinner"/> : 'Update now'}</button>
+        <button className="btn" onClick={onRefresh} disabled={st.running}>{st.running ? <span className="spinner"/> : 'Update now'}</button>
         <button className="btn" onClick={() => open('rankings')}>Rankings</button>
         <button className="btn" onClick={onSearch}>Search <kbd>Ctrl K</kbd></button>
         <button className="btn" onClick={() => open('competitors:'+own[0]?.id)}>Add competitor</button>
@@ -423,30 +425,22 @@ function App() {
   </div>;
 }
 
-// Sliding highlight for every segmented control: measures the pressed button and moves one pill to it.
-function placeSeg(seg, animate = true) {
-  const on = seg.querySelector(':scope > [aria-pressed=true]');
-  if (!on) { seg.style.setProperty('--sw', '0px'); return; }
-  if (!animate) seg.classList.add('seg-still');
-  seg.style.setProperty('--sx', on.offsetLeft+'px'); seg.style.setProperty('--sw', on.offsetWidth+'px');
-  seg.style.setProperty('--sy', on.offsetTop+'px'); seg.style.setProperty('--sh', on.offsetHeight+'px');
-  seg.classList.add('seg-ready');
-  if (!animate) requestAnimationFrame(() => requestAnimationFrame(() => seg.classList.remove('seg-still')));
-}
+installGlass();
+installSeg();
 
+// Soft spotlight that follows the pointer over cards.
+// At most once a frame: each update restyles the card, so raw pointer events (often 120+ a second) were wasted work.
 if (typeof document !== 'undefined') {
-  new MutationObserver(list => {
-    const segs = new Set();
-    for (const m of list) {
-      if (m.type === 'attributes') { const seg = m.target.parentElement; if (seg?.classList.contains('seg')) segs.add(seg); }
-      else for (const n of m.addedNodes) if (n.nodeType === 1) (n.classList.contains('seg') ? [n] : n.querySelectorAll('.seg')).forEach(x => placeSeg(x, false));
-    }
-    segs.forEach(x => placeSeg(x));
-  }).observe(document.documentElement, {subtree:true, childList:true, attributes:true, attributeFilter:['aria-pressed']});
-  addEventListener('resize', () => document.querySelectorAll('.seg').forEach(x => placeSeg(x, false)));
-  document.fonts?.ready.then(() => document.querySelectorAll('.seg').forEach(x => placeSeg(x, false)));
+  let ev = null, queued = 0;
+  document.addEventListener('pointermove', e => {
+    ev = e;
+    queued ||= requestAnimationFrame(() => {
+      queued = 0;
+      const el = ev.target.closest?.('.card,.kpi'); if (!el) return;
+      const b = el.getBoundingClientRect(); el.style.setProperty('--mx', (ev.clientX - b.left)+'px'); el.style.setProperty('--my', (ev.clientY - b.top)+'px');
+    });
+  }, {passive:true});
 }
-
 
 // ---------- remote mode (page on Vercel) ----------
 function useRemote() {

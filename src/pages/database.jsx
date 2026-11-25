@@ -50,7 +50,7 @@ function CloudCard({m, busy, act}) {
     <div className="card-head"><div><h2>Cloud database</h2><span className="muted">Turso · shared by every node · counters since this server started {ago(m.since)}</span></div>
       <div className="row">
         <button className="btn" disabled={!!busy} onClick={() => act('sync', 'Sync')}>{busy === 'sync' ? <span className="spinner"/> : 'Sync now'}</button>
-        <button className="btn primary" disabled={!!busy} onClick={() => act('ping', 'Connection')}>{busy === 'ping' ? <span className="spinner"/> : 'Test connection'}</button>
+        <button className="btn" disabled={!!busy} onClick={() => act('ping', 'Connection')}>{busy === 'ping' ? <span className="spinner"/> : 'Test connection'}</button>
       </div></div>
     <div className="cl-grid">
       <dl className="cl-facts">{rows.map(([k, v]) => <div key={k}><dt className="muted small">{k}</dt><dd>{v}</dd></div>)}</dl>
@@ -166,7 +166,7 @@ function BackupCard() {
   const size = n => n > 1e6 ? (n / 1e6).toFixed(1) + ' MB' : Math.round(n / 1e3) + ' KB';
   return <section className="card">
     <div className="card-head"><div><h2>Backups</h2><span className="muted">A checked copy of all history every day · last 14 days kept · damaged databases are restored automatically</span></div>
-      <button className="btn primary" disabled={!!busy} onClick={() => run('now', async () => { const r = await api('/api/backups', {method:'POST'}); toast('Backup saved.', {kind:'ok'}); return r; })}>{busy === 'now' ? <span className="spinner"/> : 'Back up now'}</button></div>
+      <button className="btn" disabled={!!busy} onClick={() => run('now', async () => { const r = await api('/api/backups', {method:'POST'}); toast('Backup saved.', {kind:'ok'}); return r; })}>{busy === 'now' ? <span className="spinner"/> : 'Back up now'}</button></div>
     {!b ? <div className="skeleton" style={{height:60}}/> : <>
       <p className="muted small" style={{marginTop:0}}>{b.last ? 'Last backup '+ago(b.last) : 'No backup yet'} · {b.files.length} saved in <code>{b.dir}</code>{b.error && <span className="error"> · Last attempt failed: {b.error}</span>}</p>
       <form className="row wrap" onSubmit={e => { e.preventDefault(); const mirror = new FormData(e.currentTarget).get('mirror'); run('mirror', async () => { const r = await api('/api/settings/backup', {method:'POST', body:JSON.stringify({mirror})}); toast(mirror ? 'Second backup folder saved.' : 'Second backup folder removed.', {kind:'ok'}); return r; }); }}>

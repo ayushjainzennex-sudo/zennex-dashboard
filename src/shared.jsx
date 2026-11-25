@@ -79,7 +79,32 @@ function OutlierBadge({v, corner}) {
   return <span className={'outlier'+(corner ? ' corner' : '')+(v.score >= 5 ? ' big' : '')} title={`${fmt(v.views)} views vs a typical ${fmt(v.baseline)} for this channel's ${v.short ? 'Shorts' : 'long-form videos'} (median of ${v.peers})`}>▲ {v.score.toFixed(1)}× outlier</span>;
 }
 
-function ChannelCard({c, open, maxViews}) {
+// Recent uploads as a strip of bars (oldest left, newest right), height = views. Bars are grey; outliers (well
+// above the channel's usual for that type of video) take the channel colour. The dashed line is the average.
+// Hover a bar for the video.
+function UploadStrip({s}) {
+  const vids = s.recent.slice(0, 16).reverse();
+  if (!vids.length) return <div className="ustrip empty">No uploads loaded yet</div>;
+  const max = Math.max(1, ...vids.map(v => v.views || 0));
+  return <div className="ustrip" role="img" aria-label={`Views of the last ${vids.length} uploads, average ${short(s.avgRecent)}`}>
+    {s.avgRecent ? <span className="ustrip-avg" style={{bottom:Math.min(100, s.avgRecent / max * 100)+'%'}} title={'Average '+short(s.avgRecent)+' views'}/> : null}
+    {vids.map(v => <i key={v.id} className={v.outlier ? 'hot' : ''} style={{height:Math.max(4, (v.views || 0) / max * 100)+'%'}}
+      title={`${v.title}
+${fmt(v.views)} views · ${ago(v.published)}${v.short ? ' · Short' : ''}${v.score != null ? ' · '+v.score.toFixed(1)+'× usual' : ''}`}/>)}
+  </div>;
+}
+
+// Progress from the last subscriber milestone passed to the next, as a small inline bar; the ETA is in the tooltip.
+function Milestone({c}) {
+  const p = projection(c), subs = c.subscribers ?? 0;
+  if (!p.next) return <span/>;
+  const prev = [0, ...MILESTONES].filter(m => m <= subs).at(-1);
+  const pct = Math.max(0, Math.min(100, (subs - prev) / (p.next - prev) * 100));
+  return <span className="ms" title={`${short(p.next - subs)} to go. ${p.eta ? 'At this pace: '+p.label : 'No subscriber growth measured lately.'}`}>
+    <span className="ms-track"><i style={{width:pct+'%'}}/></span>{Math.floor(pct)}% to {short(p.next)}</span>;
+}
+
+function ChannelCard({c, open}) {
   const s = stats(c);
   return <button className="channel-card" onClick={() => open('ch:'+c.id)} style={{'--c':c.color}}>
     <div className="cc-head"><Avatar channel={c}/><div><strong>{c.title || c.name}</strong><span>{c.handle || c.path}</span></div><span className="chev">→</span></div>
@@ -88,8 +113,8 @@ function ChannelCard({c, open, maxViews}) {
       <div><span>Total views</span><strong>{short(c.totalViews)}</strong><Delta d={c.deltas.week?.v}/></div>
       <div><span>Videos</span><strong>{fmt(c.videoCount)}</strong><Delta d={c.deltas.week?.n}/></div>
     </div>
-    <div className="share"><div style={{width:((c.totalViews||0)/maxViews*100)+'%'}}/></div>
-    <div className="cc-foot"><span>Next: {projection(c).label}</span><span>Last upload {ago(s.lastUpload)}</span></div>
+    <UploadStrip s={s}/>
+    <div className="cc-foot"><Milestone c={c}/><span>Last upload {ago(s.lastUpload)}</span></div>
     {c.error && <div className="cc-error">Last update failed: {c.error}</div>}
   </button>;
 }

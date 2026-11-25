@@ -40,6 +40,43 @@ function LatestVideo({l, ch}) {
     <span className="lv-date">{shortDate(v.date)}</span><span className="lv-t">{v.title}</span><span className="lv-ago muted">{ago(v.date)}</span></a>;
 }
 
+// ---------- sorting the budget table ----------
+// A budget's amount from its name: "30000 Laptops" → 30000, "Under ₹60K" → 60000, "Under ₹1 lakh" → 100000.
+function amount(name) {
+  const m = /(\d[\d,]*(?:\.\d+)?)\s*(lakh|lac|l\b|k\b|crore|cr\b)?/i.exec(name);
+  if (!m) return null;
+  const n = parseFloat(m[1].replace(/,/g, '')), u = (m[2] ?? '').toLowerCase();
+  return n * (u.startsWith('l') ? 1e5 : u === 'k' ? 1e3 : u.startsWith('cr') ? 1e7 : 1);
+}
+const checked = s => s.queries.filter(q => q.ts && !q.error);
+// Each column's sort value; null (not checked yet, nothing found) always sorts last, whichever direction.
+const SORTS = {
+  budget: s => amount(s.name),
+  status: s => !checked(s).length ? null : {missing:0, weak:1}[s.status] ?? 2,   // worst first
+  position: s => { const d = checked(s); return d.length ? avg(d.map(q => q.rank ?? 21)) : null; },   // best average first
+  latest: (s, ch) => { const v = ch && s.latest?.[ch.id]; return v ? -new Date(v.date) : null; },     // newest first
+  intop: (s, ch, top) => { const d = checked(s); return d.length ? -d.filter(q => q.rank != null && q.rank <= top).length / d.length : null; }   // most first
+};
+function sortSubs(subs, sort, ch, top) {
+  if (!sort || !SORTS[sort.k]) return subs;
+  const val = new Map(subs.map(s => [s, SORTS[sort.k](s, ch, top)]));
+  const dir = sort.dir === 'desc' ? -1 : 1;
+  return [...subs].sort((a, b) => {
+    const x = val.get(a), y = val.get(b);
+    if (x == null || y == null) return x == null ? (y == null ? 0 : 1) : -1;
+    return (x - y) * dir || a.name.localeCompare(b.name, undefined, {numeric:true});
+  });
+}
+// Click a header: sort by it; click again: reverse; a third time: back to your own order.
+function SortTh({k, sort, setSort, className, children, label}) {
+  const on = sort?.k === k;
+  const next = () => setSort(!on ? {k, dir:'asc'} : sort.dir === 'asc' ? {k, dir:'desc'} : null);
+  return <th className={(className ? className+' ' : '')+'sort-th'+(on ? ' sorted' : '')} aria-sort={on ? (sort.dir === 'asc' ? 'ascending' : 'descending') : 'none'}>
+    <button type="button" className="th-sort" onClick={next} title={on && sort.dir === 'desc' ? 'Back to your order' : 'Sort by '+label}>
+      {children}<span className="sort-ind" aria-hidden="true">{on ? (sort.dir === 'asc' ? '▲' : '▼') : '▲'}</span></button>
+  </th>;
+}
+
 function BudgetRow({s, cat, rk, busy, open, onToggle, onCheck, onEdit, onDelete, onMute, lvCh}) {
   const done = s.queries.filter(q => q.ts && !q.error);
   const inTop = done.filter(q => q.rank != null && q.rank <= rk.top).length;
@@ -104,6 +141,9 @@ function Rankings({data, own, call, setNotice, undo}) {
   // Which of your channels the "Latest video" column shows; defaults to the category's channel.
   const [lvPick, setLvId] = useState(null);
   const lvCh = own.find(o => o.id === lvPick) ?? own.find(o => o.id === cat?.channel) ?? own[0];
+  const [sort, setSort] = usePref('rankSort', null);
+  const shown = useMemo(() => sortSubs(subs, sort, lvCh, rk.top), [subs, sort, lvCh, rk.top]);
+  const th = {sort, setSort};
 
   return <>
     <div className="toolbar spread">
@@ -112,7 +152,7 @@ function Rankings({data, own, call, setNotice, undo}) {
         <button className="link-btn" onClick={() => setEditing('category')}>+ Category</button>
       </div>
       <div className="row"><span className="muted small">{lastCheck ? 'Checked '+ago(lastCheck) : 'Not checked'}</span>
-        {cat && <button className="btn primary" disabled={!!busy || !!man || !!w.pausedUntil} onClick={() => check({category:cat.id})}>{man && man.category === cat.id ? <><span className="spinner"/>Checking…</> : 'Check '+cat.name+' now'}</button>}</div>
+        {cat && <button className="btn" disabled={!!busy || !!man || !!w.pausedUntil} onClick={() => check({category:cat.id})}>{man && man.category === cat.id ? <><span className="spinner"/>Checking…</> : 'Check '+cat.name+' now'}</button>}</div>
     </div>
     {editing === 'category' && <form className="editor" onSubmit={addCategory}><div className="fields">
       <label>Category<input name="name" placeholder="e.g. Smartphone" required maxLength="80"/></label>
@@ -140,8 +180,13 @@ function Rankings({data, own, call, setNotice, undo}) {
       </div>
       {editSub && <SubEditor sub={editSub} category={cat.id} onSave={saveSub} onCancel={() => setEditing(null)}/>}
       <div className="table-wrap"><table className="rank-table">
-        <thead><tr><th>Budget</th><th>Status</th><th>Position per search</th><th className="lv-th"><span>Latest video of</span><select value={lvCh?.id ?? ''} onChange={e => setLvId(Number(e.target.value))} aria-label="Channel for latest video">{own.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}</select></th><th className="num">In top {rk.top}</th></tr></thead>
-        <tbody>{subs.map(s => <BudgetRow key={s.id} s={s} cat={cat} rk={rk} open={open === s.id} onToggle={() => setOpen(o => o === s.id ? null : s.id)}
+        <thead><tr><SortTh k="budget" label="budget" {...th}>Budget</SortTh><SortTh k="status" label="status (worst first)" {...th}>Status</SortTh>
+          <SortTh k="position" label="average position (best first)" {...th}>Position per search</SortTh>
+          <th className={'lv-th sort-th'+(sort?.k === 'latest' ? ' sorted' : '')} aria-sort={sort?.k === 'latest' ? (sort.dir === 'asc' ? 'ascending' : 'descending') : 'none'}>
+            <button type="button" className="th-sort" onClick={() => setSort(sort?.k !== 'latest' ? {k:'latest', dir:'asc'} : sort.dir === 'asc' ? {k:'latest', dir:'desc'} : null)} title="Sort by latest video (newest first)">
+              Latest video of<span className="sort-ind" aria-hidden="true">{sort?.k === 'latest' && sort.dir === 'desc' ? '▼' : '▲'}</span></button><select value={lvCh?.id ?? ''} onChange={e => setLvId(Number(e.target.value))} aria-label="Channel for latest video">{own.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}</select></th>
+          <SortTh k="intop" label={'share in top '+rk.top+' (most first)'} className="num" {...th}>In top {rk.top}</SortTh></tr></thead>
+        <tbody>{shown.map(s => <BudgetRow key={s.id} s={s} cat={cat} rk={rk} open={open === s.id} onToggle={() => setOpen(o => o === s.id ? null : s.id)}
           lvCh={lvCh} busy={!!man || !!busy || !!w.pausedUntil} onCheck={() => check({sub:s.id})}
           onMute={q => call('/api/rankings/queries/'+q.id+'/mute', {method:'POST', body:JSON.stringify({muted:!q.muted})}).then(() => toast(q.muted ? 'Search unmuted' : 'Search muted. It won’t be checked or alerted on.', {ttl:3000})).catch(err => toast(err.message, {kind:'error'}))} onEdit={() => setEditing(s.id)}
           onDelete={() => { setOpen(null); undo('sub:'+s.id, 'Deleted '+s.name, () => call('/api/rankings/subcategories/'+s.id, {method:'DELETE'})); }}/>)}</tbody>
