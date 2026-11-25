@@ -2,6 +2,7 @@ import React, {useState, useEffect, useMemo, lazy, Suspense} from 'react';
 import {createRoot} from 'react-dom/client';
 import '@fontsource-variable/inter';
 import './style.css';
+import {Icon, Logo} from './icons.jsx';
 import {REMOTE, nodeFetch, onChange, state as remoteState, signIn, signOut, refreshNodes} from './remote.js';
 import {Avatar, ConfirmHost, DAY, PageSkeleton, ToastHost, ago, api, applyDensity, avatarAt, fmt, fresh, key, pref, reduceMotion, setPref, short, shortDate, thumbProps, toast, today, yt} from './shared.jsx';
 import {Overview} from './pages/overview.jsx';
@@ -125,7 +126,7 @@ const currentTheme = () => document.documentElement.getAttribute('data-theme') |
 function ThemeButton() {
   const [t, setT] = useState(currentTheme);
   const flip = () => { const n = t === 'dark' ? 'light' : 'dark'; applyTheme(n); setPref('theme', n); setT(n); };
-  return <button className="btn icon" onClick={flip} aria-label={'Switch to '+(t === 'dark' ? 'light' : 'dark')+' mode'} title={'Switch to '+(t === 'dark' ? 'light' : 'dark')+' mode'}>{t === 'dark' ? '☀' : '☾'}</button>;
+  return <button className="btn icon" onClick={flip} aria-label={'Switch to '+(t === 'dark' ? 'light' : 'dark')+' mode'} title={'Switch to '+(t === 'dark' ? 'light' : 'dark')+' mode'}><Icon name={t === 'dark' ? 'sun' : 'moon'}/></button>;
 }
 
 // ---------- command palette ----------
@@ -359,23 +360,23 @@ function App() {
     {palette && <CommandPalette items={paletteItems} onClose={() => setPalette(false)} own={own} onOpen={setPage}
       onTrack={(input, ownId) => call('/api/competitors', {method:'POST', body:JSON.stringify({input, own:ownId})})}/>}
     <aside className="sidebar">
-      <div className="brand"><span className="logo">▶</span>Channel Studio</div>
+      <div className="brand"><span className="logo"><Logo/></span>Channel Studio</div>
       <nav aria-label="Main">
         <span className="nav-label">Dashboard</span>
-        {nav('overview', 'Overview', <span className="nav-icon">◧</span>)}
-        {nav('insights', 'Insights', <span className="nav-icon">◔</span>)}
-        {nav('rankings', 'Rankings', <span className="nav-icon">#</span>, data?.rankings.categories.flatMap(c => c.subs).filter(s => s.status === 'weak' || s.status === 'missing').length, true)}
-        {nav('report', 'Weekly report', <span className="nav-icon">▤</span>)}
-        {nav('alerts', 'Alerts', <span className="nav-icon">◉</span>, data?.unread, true)}
+        {nav('overview', 'Overview', <span className="nav-icon"><Icon name="overview"/></span>)}
+        {nav('insights', 'Insights', <span className="nav-icon"><Icon name="insights"/></span>)}
+        {nav('rankings', 'Rankings', <span className="nav-icon"><Icon name="rankings"/></span>, data?.rankings.categories.flatMap(c => c.subs).filter(s => s.status === 'weak' || s.status === 'missing').length, true)}
+        {nav('report', 'Weekly report', <span className="nav-icon"><Icon name="report"/></span>)}
+        {nav('alerts', 'Alerts', <span className="nav-icon"><Icon name="alerts"/></span>, data?.unread, true)}
         <span className="nav-label">Your channels</span>
         {own.map(c => <React.Fragment key={c.id}>{nav('ch:'+c.id, c.name, <Avatar channel={c} size={22}/>)}</React.Fragment>)}
         <span className="nav-label">Competitors</span>
-        {own.map(o => <React.Fragment key={o.id}>{nav('competitors:'+o.id, o.name+' rivals', <span className="nav-icon" style={{color:o.color}}>⚑</span>, o.rivals)}</React.Fragment>)}
+        {own.map(o => <React.Fragment key={o.id}>{nav('competitors:'+o.id, o.name+' rivals', <span className="nav-icon" style={{color:o.color}}><Icon name="flag"/></span>, o.rivals)}</React.Fragment>)}
         <span className="nav-label">Tools</span>
-        {nav('settings', 'Settings', <span className="nav-icon">⚙</span>)}
-        {nav('database', 'Database', <span className="nav-icon">◫</span>)}
-        {nav('nodes', 'Nodes', <span className="nav-icon">⧉</span>)}
-        {nav('planner', 'Planner & lookup', <span className="nav-icon">☰</span>, data?.plans.filter(p => p.status !== 'Published').length)}
+        {nav('settings', 'Settings', <span className="nav-icon"><Icon name="settings"/></span>)}
+        {nav('database', 'Database', <span className="nav-icon"><Icon name="database"/></span>)}
+        {nav('nodes', 'Nodes', <span className="nav-icon"><Icon name="nodes"/></span>)}
+        {nav('planner', 'Planner & lookup', <span className="nav-icon"><Icon name="planner"/></span>, data?.plans.filter(p => p.status !== 'Published').length)}
       </nav>
       <div className="side-foot">
         {status && <div className="sync">
@@ -391,10 +392,10 @@ function App() {
       <header className="topbar">
         <div><h1 className="page-title">{title}</h1><span className="muted small">{status?.lastRun ? 'Updated '+ago(status.lastRun.finished_at) : 'Waiting for first update'} · public YouTube data</span></div>
         <div className="row">
-          <button className="btn search-btn" onClick={() => setPalette(true)} aria-label="Search (Ctrl+K)"><span>⌕</span><span className="sb-text">Search</span><kbd>Ctrl K</kbd></button>
+          <button className="btn search-btn" onClick={() => setPalette(true)} aria-label="Search (Ctrl+K)"><Icon name="search"/><span className="sb-text">Search</span><kbd>Ctrl K</kbd></button>
           <ThemeButton/>
-          <button className="btn icon" onClick={() => setPage('alerts')} aria-label={'Alerts'+(data?.unread ? ', '+data.unread+' unread' : '')}>◉{data?.unread ? <span className="bell">{data.unread}</span> : null}</button>
-          <button className="btn primary" onClick={refresh} disabled={refreshing || status?.running}>{refreshing || status?.running ? <><span className="spinner"/>Updating</> : '↻ Update now'}</button>
+          <button className="btn icon" onClick={() => setPage('alerts')} aria-label={'Alerts'+(data?.unread ? ', '+data.unread+' unread' : '')}><Icon name="alerts"/>{data?.unread ? <span className="bell">{data.unread}</span> : null}</button>
+          <button className="btn primary" onClick={refresh} disabled={refreshing || status?.running}>{refreshing || status?.running ? <><span className="spinner"/>Updating</> : <><Icon name="refresh"/>Update now</>}</button>
         </div>
       </header>
       <ConnectionBanner conn={conn} retryIn={retryIn} stale={status?.lastRun?.finished_at} onRetry={() => { attempt.current = 0; setRetryIn(0); }}/>
@@ -446,11 +447,6 @@ if (typeof document !== 'undefined') {
   document.fonts?.ready.then(() => document.querySelectorAll('.seg').forEach(x => placeSeg(x, false)));
 }
 
-// Soft spotlight that follows the pointer over cards.
-if (typeof document !== 'undefined') document.addEventListener('pointermove', e => {
-  const el = e.target.closest?.('.card,.kpi'); if (!el) return;
-  const b = el.getBoundingClientRect(); el.style.setProperty('--mx', (e.clientX - b.left)+'px'); el.style.setProperty('--my', (e.clientY - b.top)+'px');
-}, {passive:true});
 
 // ---------- remote mode (page on Vercel) ----------
 function useRemote() {
