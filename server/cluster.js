@@ -10,7 +10,7 @@ import {existsSync, readFileSync, readdirSync, statfsSync, writeFileSync} from '
 import {cpus, freemem, hostname, networkInterfaces, totalmem} from 'node:os';
 import {fileURLToPath} from 'node:url';
 import {dirname, join} from 'node:path';
-import {db, cloud, primary, remoteRun, remoteAll, writes, sync} from './db.js';
+import {db, cloud, primary, remoteRun, remoteAll, writes, sync, syncNow} from './db.js';
 import {tunnel, startTunnel} from './tunnel.js';
 import {updateState, tick as updateTick, apply as applyUpdate, blocker as updateBlocker} from './updater.js';
 
@@ -202,4 +202,7 @@ export async function requestUpdate(id) {
 }
 export async function setAutoUpdate(on) {
   await remoteRun(`INSERT INTO settings (key, value) VALUES ('nodes.autoUpdate', ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value`, [JSON.stringify(!!on)]);
+  // the write went straight to the shared database; pull it into the local copy so the page (which reads the
+  // local copy) shows the new value at once instead of snapping back until the next sync
+  try { syncNow(); } catch (err) { console.error('[dashboard] sync after auto-update change failed:', err.message); }
 }
