@@ -2,21 +2,24 @@
 import {Ytdl} from '@distube/ytdl-core';
 import {randomUUID} from 'node:crypto';
 import {checkToken, bearer, isLocal} from './auth.js';
+import {compile, match, reply, REPLY, HttpError, readJson} from './router.js';
 import {gzipSync} from 'node:zlib';
 import {db, tx, batch, nextCompetitorColor, startSync, stopSync} from './db.js';
-import {loadChannel, loadUploads, channelPath, searchChannels, searchChannelVideos} from './youtube.js';
+import {loadChannel, loadUploads, channelPath, searchChannels, searchChannelVideos, onReaderHealth} from './youtube.js';
 import {notify, notificationSettings, saveNotification, sendTest, digestSettings, saveDigest, markDigestSent, broadcast} from './notify.js';
 import {startRankWorker, stopRankWorker, rankingData, rankingRoutes, rankNodeStatus} from './rankings.js';
-import {startHeartbeat, stopHeartbeat, setStatusProvider, claim, isActive, countWork, nodesData, setNodeMode, removeNode, NODE_ID, NODE_NAME, VERSION} from './cluster.js';
+import {startHeartbeat, stopHeartbeat, setStatusProvider, claim, isActive, countWork, nodesData, setNodeMode, removeNode, requestUpdate, setAutoUpdate, NODE_ID, NODE_NAME, VERSION} from './cluster.js';
 import {digestLines} from './watchdog.js';
 import {backupNow, backupSettings, setMirror, startBackups, stopBackups} from './backup.js';
 import {dbHealth, runAction, saveDbSettings, startMaintenance, stopMaintenance} from './dbhealth.js';
+import {onBeforeRestart} from './updater.js';
 
 const HOUR = 3600e3, DAY = 24 * HOUR;
 export const INTERVAL = 60 * 60 * 1000;
 export const OUTLIER = 2; // views ≥ 2× the channel's median video of the same format
 const MILESTONES = [1e3, 5e3, 1e4, 25e3, 5e4, 1e5, 25e4, 5e5, 1e6, 2e6, 5e6, 1e7, 2e7, 5e7, 1e8];
 const LAUNCH_AGES = [1, 3, 6, 12, 24, 48, 72];
+const READERS = {channel: 'channel pages', feed: 'upload feeds', videos: 'Videos tabs', shorts: 'Shorts tabs', search: 'search results', 'channel-search': 'channel search', 'in-channel-search': 'in-channel search'};
 const iso = (t = Date.now()) => new Date(t).toISOString();
 const yt = new Ytdl();
 const state = globalThis.__ytDashboard ??= {running: null, timer: null, firstTimer: null, nextRun: null};
@@ -164,7 +167,14 @@ export function startScheduler() {
   startBackups();
   startMaintenance();
   startRankWorker(alert);
-  const last = db.prepare(`SELECT finished_at FROM runs WHERE finished_at IS NOT NULL ORDER BY id DESC LIMIT 1`).get()?.finished_at;
+  // Before a self-update restart: stop the background work and hand jobs back.
+  onBeforeRestart(stopScheduler);
+  // A YouTube page reader failing 3 times in a row (layout change, blocking) shows up in the alert feed and on Discord/Slack.
+  onReaderHealth(
+    (reader, error, fails) => alert('system', null, null, `Can't read YouTube ${READERS[reader] ?? reader} on ${NODE_NAME}`,
+      `${fails} failed reads in a row. Last error: ${error}\nIf this keeps happening, YouTube may have changed the page or is limiting this node.`, {rich: {severity: 'high', heading: `⚠ Can't read YouTube ${READERS[reader] ?? reader}`, summary: `${NODE_NAME}: ${fails} failed reads in a row. ${error}`, lines: [], more: 0, footer: 'Channel Studio'}}),
+    reader => alert('system', null, null, `YouTube ${READERS[reader] ?? reader} readable again on ${NODE_NAME}`, null, {push: false}));
+  const last =db.prepare(`SELECT finished_at FROM runs WHERE finished_at IS NOT NULL ORDER BY id DESC LIMIT 1`).get()?.finished_at;
   const firstIn = !last ? 0 : Math.max(0, INTERVAL - (Date.now() - new Date(last)));
   state.nextRun = Date.now() + firstIn;
   state.firstTimer = setTimeout(() => {
@@ -309,11 +319,6 @@ export function dashboard() {
 }
 
 // ---------- HTTP ----------
-async function readJson(request) {
-  let body = '';
-  for await (const chunk of request) { body += chunk; if (body.length > 2e5) throw Object.assign(new Error('Request too large.'), {status: 413}); }
-  return body ? JSON.parse(body) : {};
-}
 const STATUSES = ['Idea', 'In production', 'Scheduled', 'Published'], FORMATS = ['Long-form', 'Short'];
 function cleanPlan(p) {
   const title = String(p.title ?? '').trim().slice(0, 150);
@@ -449,6 +454,124 @@ function lookupView(data, fetchedAt, cached) {
     approxCount: list.filter(v => v.approx || !v.published).length};
 }
 
+// ---------- routes ----------
+// Each handler gets {params, query, body(), request, response, route} and returns the JSON for a 200,
+// or reply(status, body). Errors with a .status (HttpError) are sent with that status.
+const routes = compile([
+  ['GET', '/api/dashboard', () => dashboard()],
+
+  // Nodes. The ping is open to any origin so the Nodes page can time every node from the browser.
+  ['GET', '/api/node/ping', ({response}) => { response.setHeader('Access-Control-Allow-Origin', '*'); return {id: NODE_ID, name: NODE_NAME, version: VERSION, time: iso()}; }],
+  ['GET', '/api/nodes', () => nodesData()],
+  ['POST', '/api/nodes/:id([\\w-]+)/mode', async ({params, body}) => { await setNodeMode(params.id, (await body()).mode); return nodesData(); }],
+  ['DELETE', '/api/nodes/:id([\\w-]+)', async ({params}) => { await removeNode(params.id); return nodesData(); }],
+  ['POST', '/api/nodes/:id([\\w-]+)/update', async ({params}) => ({result: await requestUpdate(params.id), ...(await nodesData())})],
+  ['POST', '/api/nodes/auto-update', async ({body}) => { await setAutoUpdate((await body()).on === true); return nodesData(); }],
+
+  ['GET', '/api/search/channels', async ({query}) => {
+    const q = (query.get('q') ?? '').trim().slice(0, 100);
+    if (q.length < 2) return [];
+    const known = db.prepare(`SELECT id, kind, channel_id FROM channels`).all();
+    return (await searchChannels(q)).map(c => ({...c, tracked: known.find(k => k.channel_id === c.channelId) ?? null}));
+  }],
+
+  // Exact upload dates from the browser extension.
+  ['GET', '/api/dates/pending', ({query}) => pendingDates(Math.min(100, Number(query.get('limit')) || 25))],
+  ['POST', '/api/dates', async ({body}) => saveDates((await body()).dates)],
+  ['GET', '/api/dates/status', () => pendingDates(0)],
+
+  ['GET', '/api/channels/:id(\\d+)/search', ({params, query}) => {
+    const q = (query.get('q') ?? '').trim().slice(0, 100);
+    if (q.length < 2) throw new HttpError(400, 'Type at least 2 characters.');
+    return channelSearch(Number(params.id), q);
+  }],
+  ['GET', '/api/lookup/:id(UC[\\w-]{22})', ({params}) => lookupChannel(params.id)],
+
+  // Database, backups and the manual update.
+  ['GET', '/api/db/health', () => dbHealth()],
+  ['POST', '/api/db/settings', async ({body}) => { saveDbSettings(await body()); return dbHealth(); }],
+  ['POST', '/api/db/action', async ({body}) => { const {action} = await body(); const result = await runAction(String(action ?? '')); return {...result, health: dbHealth()}; }],
+  ['GET', '/api/backups', () => backupSettings()],
+  ['POST', '/api/backups', () => backupNow()],
+  ['POST', '/api/settings/backup', async ({body}) => setMirror((await body()).mirror)],
+  ['POST', '/api/refresh', async () => { await runBatch('manual'); return dashboard(); }],
+
+  // Competitors.
+  ['POST', '/api/competitors', async ({body}) => {
+    const {input, own} = await body();
+    const owner = db.prepare(`SELECT id, name FROM channels WHERE id=? AND kind='own'`).get(Number(own));
+    if (!owner) throw new HttpError(400, 'Choose which of your channels this competitor is for.');
+    const path = typeof input === 'string' ? channelPath(input.slice(0, 300)) : null;
+    if (!path) throw new HttpError(400, 'Enter a channel handle like @mkbhd or a YouTube channel link.');
+    const data = await loadChannel(path).catch(err => { throw Object.assign(err, {status: 404}); });
+    const exists = db.prepare(`SELECT id, kind, name FROM channels WHERE path=? OR (channel_id IS NOT NULL AND channel_id=?)`).get(data.handle ?? path, data.channelId ?? '');
+    if (exists?.kind === 'own') throw new HttpError(409, 'That is one of your channels: ' + exists.name + '.');
+    if (exists) {
+      // Already tracked for another of your channels: just link it here, keeping its history.
+      if (db.prepare(`SELECT 1 FROM rivals WHERE own=? AND competitor=?`).get(owner.id, exists.id)) throw new HttpError(409, exists.name + ' is already a competitor of ' + owner.name + '.');
+      db.prepare(`INSERT INTO rivals (own, competitor) VALUES (?,?)`).run(owner.id, exists.id);
+      return reply(201, dashboard());
+    }
+    const {lastInsertRowid: id} = db.prepare(`INSERT INTO channels (path, kind, name, color, position) VALUES (?, 'competitor', ?, ?, (SELECT coalesce(max(position),0)+1 FROM channels WHERE kind='competitor'))`)
+      .run(data.handle ?? path, data.title || path, nextCompetitorColor());
+    db.prepare(`INSERT INTO rivals (own, competitor) VALUES (?,?)`).run(owner.id, id);
+    await store({id}, data);
+    await loadUploads(data.handle ?? path).then(u => backfill({id}, u)).catch(() => {});
+    return reply(201, dashboard());
+  }],
+  ['DELETE', '/api/competitors/:id(\\d+)', ({params, query}) => {
+    // With ?own=, unlink from that channel only; the competitor (and its history) is deleted once nothing links to it.
+    const id = Number(params.id), own = query.get('own');
+    tx(() => {
+      if (own) db.prepare(`DELETE FROM rivals WHERE own=? AND competitor=?`).run(Number(own), id);
+      if (!own || !db.prepare(`SELECT 1 FROM rivals WHERE competitor=?`).get(id)) db.prepare(`DELETE FROM channels WHERE id=? AND kind='competitor'`).run(id);
+    });
+    return dashboard();
+  }],
+
+  // Rankings has its own sub-routes (server/rankings.js).
+  ['*', '/api/rankings/:rest(.+)', async ({route, body}) => {
+    const out = await rankingRoutes(route, body, alert);
+    if (!out) throw new HttpError(404, 'Unknown API route.');
+    return out.json ?? dashboard();
+  }],
+
+  // Notifications and alerts.
+  ['POST', '/api/settings/digest', async ({body}) => { saveDigest(await body()); return dashboard(); }],
+  ['POST', '/api/settings/digest/send', async () => { const d = digestSettings(); await broadcast(digest(d.mode === 'weekly' ? 7 : 1)); return dashboard(); }],
+  ['POST', '/api/settings/:hook(discord|slack)', async ({params, body}) => { saveNotification(params.hook, await body()); return dashboard(); }],
+  ['POST', '/api/settings/:hook(discord|slack)/test', async ({params}) => { await sendTest(params.hook); return dashboard(); }],
+  ['POST', '/api/alerts/read', () => { db.exec(`UPDATE alerts SET read=1 WHERE read=0`); return dashboard(); }],
+
+  // Planner.
+  ['POST', '/api/plans', async ({body}) => { savePlan(cleanPlan(await body())); return dashboard(); }],
+  ['POST', '/api/plans/import', async ({body}) => {
+    // One-time move of the old browser-stored planner (channel was an index into the three own channels).
+    const {videos} = await body();
+    if (db.prepare(`SELECT count(*) n FROM plans`).get().n) return dashboard();
+    const own = db.prepare(`SELECT id FROM channels WHERE kind='own' ORDER BY position`).all().map(r => r.id);
+    tx(() => (Array.isArray(videos) ? videos : []).slice(0, 500).forEach(v => { try { savePlan(cleanPlan({...v, channel: own[v?.channel] ?? own[0]})); } catch {} }));
+    return dashboard();
+  }],
+  ['DELETE', '/api/plans/:id([\\w-]+)', ({params}) => { db.prepare(`DELETE FROM plans WHERE id=?`).run(params.id); return dashboard(); }],
+
+  // Videos: views over time (from the snapshots) plus what's stored, and details for any public video.
+  ['GET', '/api/videos/:id([\\w-]{11})/history', ({params}) => {
+    const v = db.prepare(`SELECT v.id, v.title, v.short, v.published, v.approx, v.views, v.likes, c.name channel FROM videos v JOIN channels c ON c.id=v.channel WHERE v.id=?`).get(params.id);
+    const exact = db.prepare(`SELECT published FROM video_dates WHERE id=?`).get(params.id)?.published;
+    const points = db.prepare(`SELECT ts, views FROM video_snapshots WHERE video=? ORDER BY ts`).all(params.id);
+    return {video: v ? {...v, published: exact ?? v.published, exact: !!exact || v.approx === 0} : null, points};
+  }],
+  ['GET', '/api/video', async ({query}) => {
+    const id = query.get('id');
+    if (!/^[A-Za-z0-9_-]{11}$/.test(id ?? '')) throw new HttpError(400, 'Enter a valid YouTube video ID or link.');
+    try {
+      const {videoDetails: d} = await yt.getInfo('https://www.youtube.com/watch?v=' + id);
+      return {id, title: d.title, channel: d.author?.name, views: d.viewCount, seconds: d.lengthSeconds, published: d.publishDate?.slice(0, 10), thumbnail: d.thumbnails?.at(-1)?.url};
+    } catch { throw new HttpError(502, 'YouTube video details could not be retrieved. Check that the video is public and try again.'); }
+  }]
+]);
+
 export function apiMiddleware() {
   return async (request, response, next) => {
     const url = new URL(request.url, 'http://localhost');
@@ -464,7 +587,7 @@ export function apiMiddleware() {
       response.end(json);
     };
     const route = request.method + ' ' + url.pathname;
-    // Other sites (the Vercel page) may call the API; what they can do is decided by the pass check below.
+    // Other sites (the Vercel page, the browser extension) may call the API; what they can do is decided by the pass check below.
     const origin = request.headers.origin;
     if (origin) {
       response.setHeader('Access-Control-Allow-Origin', origin); response.setHeader('Vary', 'Origin');
@@ -478,122 +601,12 @@ export function apiMiddleware() {
       if (!process.env.AUTH_SECRET) return send(403, {error: 'This node is not set up for internet access (AUTH_SECRET is missing in its .env).'});
       if (!checkToken(bearer(request), process.env.AUTH_SECRET)) return send(401, {error: 'Please sign in again.', auth: true});
     }
+    const found = match(routes, request.method, url.pathname);
+    if (!found) return send(404, {error: 'Unknown API route.'});
+    if (found.status) return send(found.status, {error: 'That method is not allowed here.'});
     try {
-      if (route === 'GET /api/dashboard') return send(200, dashboard());
-      // Nodes. The ping is open to any origin so the Nodes page can time every node from the browser.
-      if (route === 'GET /api/node/ping') { response.setHeader('Access-Control-Allow-Origin', '*'); return send(200, {id: NODE_ID, name: NODE_NAME, version: VERSION, time: new Date().toISOString()}); }
-      if (route === 'GET /api/nodes') return send(200, await nodesData());
-      const nm = /^POST \/api\/nodes\/([\w-]+)\/mode$/.exec(route);
-      if (nm) { await setNodeMode(nm[1], (await readJson(request)).mode); return send(200, await nodesData()); }
-      const nd = /^DELETE \/api\/nodes\/([\w-]+)$/.exec(route);
-      if (nd) { await removeNode(nd[1]); return send(200, await nodesData()); }
-      if (route === 'GET /api/search/channels') {
-        const q = (url.searchParams.get('q') ?? '').trim();
-        if (q.length < 2) return send(200, []);
-        const known = db.prepare(`SELECT id, kind, channel_id FROM channels`).all();
-        return send(200, (await searchChannels(q)).map(c => ({...c, tracked: known.find(k => k.channel_id === c.channelId) ?? null})));
-      }
-      // Browser extension endpoints. Only chrome-extension:// pages get CORS access (plus same-origin).
-      if (url.pathname.startsWith('/api/dates')) {
-        const origin = request.headers.origin ?? '';
-        if (/^chrome-extension:\/\/[a-p]{32}$/.test(origin)) response.setHeader('Access-Control-Allow-Origin', origin), response.setHeader('Vary', 'Origin');
-        if (request.method === 'OPTIONS') { response.writeHead(204, {'Access-Control-Allow-Methods': 'GET, POST', 'Access-Control-Allow-Headers': 'Content-Type', 'Access-Control-Max-Age': '86400'}); return response.end(); }
-        if (route === 'GET /api/dates/pending') return send(200, pendingDates(Math.min(100, Number(url.searchParams.get('limit')) || 25)));
-        if (route === 'POST /api/dates') return send(200, await saveDates((await readJson(request)).dates));
-        if (route === 'GET /api/dates/status') return send(200, pendingDates(0));
-      }
-      const cs = /^\/api\/channels\/(\d+)\/search$/.exec(url.pathname);
-      if (cs && request.method === 'GET') {
-        const q = (url.searchParams.get('q') ?? '').trim().slice(0, 100);
-        if (q.length < 2) return send(400, {error: 'Type at least 2 characters.'});
-        return send(200, await channelSearch(Number(cs[1]), q));
-      }
-      const lk = /^\/api\/lookup\/(UC[\w-]{22})$/.exec(url.pathname);
-      if (lk && request.method === 'GET') return send(200, await lookupChannel(lk[1]));
-      if (route === 'GET /api/db/health') return send(200, dbHealth());
-      if (route === 'POST /api/db/settings') { saveDbSettings(await readJson(request)); return send(200, dbHealth()); }
-      if (route === 'POST /api/db/action') { const {action} = await readJson(request); const result = await runAction(action); return send(200, {...result, health: dbHealth()}); }
-      if (route === 'GET /api/backups') return send(200, backupSettings());
-      if (route === 'POST /api/backups') return send(200, backupNow());
-      if (route === 'POST /api/settings/backup') return send(200, setMirror((await readJson(request)).mirror));
-      if (route === 'POST /api/refresh') { await runBatch('manual'); return send(200, dashboard()); }
-
-      if (route === 'POST /api/competitors') {
-        const {input, own} = await readJson(request);
-        const owner = db.prepare(`SELECT id, name FROM channels WHERE id=? AND kind='own'`).get(Number(own));
-        if (!owner) return send(400, {error: 'Choose which of your channels this competitor is for.'});
-        const path = channelPath(input);
-        if (!path) return send(400, {error: 'Enter a channel handle like @mkbhd or a YouTube channel link.'});
-        const data = await loadChannel(path).catch(err => { throw Object.assign(err, {status: 404}); });
-        const exists = db.prepare(`SELECT id, kind, name FROM channels WHERE path=? OR (channel_id IS NOT NULL AND channel_id=?)`).get(data.handle ?? path, data.channelId ?? '');
-        if (exists?.kind === 'own') return send(409, {error: 'That is one of your channels: ' + exists.name + '.'});
-        if (exists) {
-          // Already tracked for another of your channels: just link it here, keeping its history.
-          if (db.prepare(`SELECT 1 FROM rivals WHERE own=? AND competitor=?`).get(owner.id, exists.id)) return send(409, {error: exists.name + ' is already a competitor of ' + owner.name + '.'});
-          db.prepare(`INSERT INTO rivals (own, competitor) VALUES (?,?)`).run(owner.id, exists.id);
-          return send(201, dashboard());
-        }
-        const {lastInsertRowid: id} = db.prepare(`INSERT INTO channels (path, kind, name, color, position) VALUES (?, 'competitor', ?, ?, (SELECT coalesce(max(position),0)+1 FROM channels WHERE kind='competitor'))`)
-          .run(data.handle ?? path, data.title || path, nextCompetitorColor());
-        db.prepare(`INSERT INTO rivals (own, competitor) VALUES (?,?)`).run(owner.id, id);
-        await store({id}, data);
-        await loadUploads(data.handle ?? path).then(u => backfill({id}, u)).catch(() => {});
-        return send(201, dashboard());
-      }
-      const del = /^DELETE \/api\/competitors\/(\d+)$/.exec(route);
-      if (del) {
-        // With ?own=, unlink from that channel only; the competitor (and its history) is deleted once nothing links to it.
-        const id = Number(del[1]), own = url.searchParams.get('own');
-        tx(() => {
-          if (own) db.prepare(`DELETE FROM rivals WHERE own=? AND competitor=?`).run(Number(own), id);
-          if (!own || !db.prepare(`SELECT 1 FROM rivals WHERE competitor=?`).get(id)) db.prepare(`DELETE FROM channels WHERE id=? AND kind='competitor'`).run(id);
-        });
-        return send(200, dashboard());
-      }
-
-      if (route.includes(' /api/rankings/')) {
-        const out = await rankingRoutes(route, () => readJson(request), alert);
-        if (out?.json) return send(200, out.json);
-        if (out) return send(200, dashboard());
-      }
-      if (route === 'POST /api/settings/digest') { saveDigest(await readJson(request)); return send(200, dashboard()); }
-      if (route === 'POST /api/settings/digest/send') { const d = digestSettings(); await broadcast(digest(d.mode === 'weekly' ? 7 : 1)); return send(200, dashboard()); }
-      const hook = /^POST \/api\/settings\/(discord|slack)(\/test)?$/.exec(route);
-      if (hook) {
-        if (hook[2]) await sendTest(hook[1]); else saveNotification(hook[1], await readJson(request));
-        return send(200, dashboard());
-      }
-      if (route === 'POST /api/alerts/read') { db.exec(`UPDATE alerts SET read=1 WHERE read=0`); return send(200, dashboard()); }
-
-      if (route === 'POST /api/plans') { savePlan(cleanPlan(await readJson(request))); return send(200, dashboard()); }
-      const delPlan = /^DELETE \/api\/plans\/([\w-]+)$/.exec(route);
-      if (delPlan) { db.prepare(`DELETE FROM plans WHERE id=?`).run(delPlan[1]); return send(200, dashboard()); }
-      if (route === 'POST /api/plans/import') {
-        // One-time move of the old browser-stored planner (channel was an index into the three own channels).
-        const {videos} = await readJson(request);
-        if (db.prepare(`SELECT count(*) n FROM plans`).get().n) return send(200, dashboard());
-        const own = db.prepare(`SELECT id FROM channels WHERE kind='own' ORDER BY position`).all().map(r => r.id);
-        tx(() => (Array.isArray(videos) ? videos : []).slice(0, 500).forEach(v => { try { savePlan(cleanPlan({...v, channel: own[v.channel] ?? own[0]})); } catch {} }));
-        return send(200, dashboard());
-      }
-
-      // Views over time for one video (from the dashboard's snapshots) plus what's stored about it.
-      const vh = /^\/api\/videos\/([\w-]{11})\/history$/.exec(url.pathname);
-      if (vh && request.method === 'GET') {
-        const v = db.prepare(`SELECT v.id, v.title, v.short, v.published, v.approx, v.views, v.likes, c.name channel FROM videos v JOIN channels c ON c.id=v.channel WHERE v.id=?`).get(vh[1]);
-        const exact = db.prepare(`SELECT published FROM video_dates WHERE id=?`).get(vh[1])?.published;
-        const points = db.prepare(`SELECT ts, views FROM video_snapshots WHERE video=? ORDER BY ts`).all(vh[1]);
-        return send(200, {video: v ? {...v, published: exact ?? v.published, exact: !!exact || v.approx === 0} : null, points});
-      }
-      if (route === 'GET /api/video') {
-        const id = url.searchParams.get('id');
-        if (!/^[A-Za-z0-9_-]{11}$/.test(id ?? '')) return send(400, {error: 'Enter a valid YouTube video ID or link.'});
-        try {
-          const {videoDetails: d} = await yt.getInfo('https://www.youtube.com/watch?v=' + id);
-          return send(200, {id, title: d.title, channel: d.author?.name, views: d.viewCount, seconds: d.lengthSeconds, published: d.publishDate?.slice(0, 10), thumbnail: d.thumbnails?.at(-1)?.url});
-        } catch { return send(502, {error: 'YouTube video details could not be retrieved. Check that the video is public and try again.'}); }
-      }
-      return send(404, {error: 'Unknown API route.'});
+      const out = await found.handler({params: found.params, query: url.searchParams, body: () => readJson(request), request, response, route});
+      return out?.[REPLY] ? send(out.status, out.body) : send(200, out ?? null);
     } catch (err) {
       return send(err.status ?? 500, {error: err.message || 'Something went wrong.'});
     }

@@ -22,5 +22,6 @@ export default defineConfig({
   // Besides this PC's own names, only tunnel addresses may be used (protects against DNS rebinding).
   server: {watch: {ignored: ['**/data/**']}, cors: false, allowedHosts},
   preview: {cors: false, allowedHosts},
-  plugins:[{name:'youtube-dashboard-api', configureServer:mount, configurePreviewServer:mount}]
+  // A dev server (npm run dev) never updates itself from GitHub; preview servers (serve:lan, autostart) can.
+  plugins:[{name:'youtube-dashboard-api', configureServer:async s => { (await import('./server/updater.js')).setDevServer(true); return mount(s); }, configurePreviewServer:mount}]
 });

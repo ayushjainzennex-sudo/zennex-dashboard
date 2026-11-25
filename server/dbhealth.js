@@ -3,6 +3,8 @@
 import {existsSync, readdirSync, statSync} from 'node:fs';
 import {join} from 'node:path';
 import {db, dbPath, backupDir, cloud, sync, writes, ping, syncNow, SYNC_SECONDS} from './db.js';
+import {claim} from './cluster.js';
+import {THIN_VIDEOS, THIN_CHANNELS, LAUNCH_DAYS} from './retention.js';
 
 const DAY = 864e5;
 const iso = (t = Date.now()) => new Date(t).toISOString();
@@ -14,13 +16,14 @@ export const DEFAULTS = {
   backupKeepDays: 14,      // daily backups kept
   backupEveryHours: 24,    // how often a backup is made
   rankResultsDays: 180,    // search-ranking checks older than this are deleted (0 = keep forever)
-  thinSnapshotsDays: 60,   // video view snapshots older than this are thinned to one per day (0 = never)
+  thinSnapshotsDays: 60,   // video view snapshots older than this are thinned to one per day (0 = never); a video's first days are kept
+  thinChannelDays: 90,     // channel snapshots (subscribers/views) older than this are thinned to one per day (0 = never)
   alertsDays: 120,         // read alerts older than this are deleted (0 = keep forever)
   incidentsDays: 90,       // resolved ranking incidents older than this are deleted (0 = keep forever)
   autoMaintenance: true,   // daily cleanup + WAL checkpoint, weekly optimize, compact when 20%+ is free space
   integrityOnStart: true   // quick check when the server starts (damaged files are restored from backup)
 };
-const LIMITS = {backupKeepDays: [3, 90], backupEveryHours: [6, 168], rankResultsDays: [0, 3650], thinSnapshotsDays: [0, 3650], alertsDays: [0, 3650], incidentsDays: [0, 3650]};
+const LIMITS = {backupKeepDays: [3, 90], backupEveryHours: [6, 168], rankResultsDays: [0, 3650], thinSnapshotsDays: [0, 3650], thinChannelDays: [0, 3650], alertsDays: [0, 3650], incidentsDays: [0, 3650]};
 export const dbSettings = () => ({...DEFAULTS, ...read('db.settings', {})});
 export function saveDbSettings(body) {
   const next = {...dbSettings()};
@@ -173,9 +176,11 @@ export function cleanup() {
     if (s.rankResultsDays) removed['ranking checks'] = Number(db.prepare(`DELETE FROM rank_results WHERE ts<?`).run(cut(s.rankResultsDays)).changes);
     if (s.alertsDays) removed['alerts'] = Number(db.prepare(`DELETE FROM alerts WHERE read=1 AND ts<?`).run(cut(s.alertsDays)).changes);
     if (s.incidentsDays) removed['incidents'] = Number(db.prepare(`DELETE FROM rank_incidents WHERE state='resolved' AND resolved<?`).run(cut(s.incidentsDays)).changes);
-    // Thin: keep the last snapshot of each day for each video.
-    if (s.thinSnapshotsDays) removed['view snapshots'] = Number(db.prepare(`DELETE FROM video_snapshots WHERE ts<? AND rowid NOT IN
-      (SELECT max(rowid) FROM video_snapshots WHERE ts<? GROUP BY video, substr(ts,1,10))`).run(cut(s.thinSnapshotsDays), cut(s.thinSnapshotsDays)).changes);
+    // Thin: keep the last snapshot of each day for each video, except in its first LAUNCH_DAYS (the launch
+    // curve that new uploads are compared against needs the hourly points).
+    if (s.thinSnapshotsDays) removed['view snapshots'] = Number(db.prepare(THIN_VIDEOS).run(cut(s.thinSnapshotsDays), cut(s.thinSnapshotsDays), LAUNCH_DAYS).changes);
+    // Thin: keep the last snapshot of each day for each channel (charts are daily; deltas look back at most ~30 days).
+    if (s.thinChannelDays) removed['channel snapshots'] = Number(db.prepare(THIN_CHANNELS).run(cut(s.thinChannelDays), cut(s.thinChannelDays)).changes);
     db.exec('COMMIT');
   } catch (err) { db.exec('ROLLBACK'); throw err; }
   const total = Object.values(removed).reduce((a, b) => a + b, 0);
@@ -185,11 +190,12 @@ export function cleanup() {
 
 // ---------- automatic maintenance ----------
 let timer = null, first = null;
-function daily() {
+async function daily() {
   const s = dbSettings(), m = read('db.maintenance', {}), age = k => m[k] ? Date.now() - Date.parse(m[k].at) : Infinity;
   if (!s.autoMaintenance) return;
   try {
-    if (age('cleanup') > 20 * 3600e3) cleanup();
+    // The cleanup changes the shared database: with several nodes, only the one holding the lease runs it.
+    if (age('cleanup') > 20 * 3600e3 && (!cloud || await claim('cleanup', 6 * 3600e3))) cleanup();
     if (age('checkpoint') > 20 * 3600e3) act('checkpoint');
     if (age('optimize') > 7 * DAY) act('optimize');
     if (age('quick-check-auto') > 7 * DAY) { act('quick-check'); mark('quick-check-auto'); }
@@ -201,7 +207,7 @@ function daily() {
 export function startMaintenance() {
   stopMaintenance();
   if (dbSettings().integrityOnStart) { try { act('quick-check'); } catch {} }
-  first = setTimeout(daily, 60e3);
-  timer = setInterval(daily, 3600e3);
+  first = setTimeout(() => daily().catch(() => {}), 60e3);
+  timer = setInterval(() => daily().catch(() => {}), 3600e3);
 }
 export function stopMaintenance() { clearTimeout(first); clearInterval(timer); timer = first = null; }

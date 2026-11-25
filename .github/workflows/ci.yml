@@ -1,0 +1,20 @@
+# Runs on every push and pull request: the tests (YouTube parsers, router, auth, data thinning) and both builds.
+name: CI
+on: [push, pull_request]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - run: npm test
+      - name: Build (node page)
+        run: npx vite build
+      - name: Build (Vercel page)
+        run: npx vite build
+        env:
+          VITE_REMOTE: '1'

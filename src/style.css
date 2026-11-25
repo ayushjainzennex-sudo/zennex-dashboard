@@ -247,7 +247,7 @@ tr.own td{background:color-mix(in srgb,var(--accent) 6%,transparent)}
 /* rankings */
 .toolbar.spread{justify-content:space-between}
 .chip-bad{background:#ff6b6b1f;border-color:#ff6b6b40;color:var(--down);font-weight:600}
-.alert-icon.k-ranking{color:var(--down)}
+.alert-icon.k-ranking{color:var(--down)}.alert-icon.k-system{color:var(--down);font-weight:700}
 .rank-list{display:flex;flex-direction:column}
 .rank-sub{border-bottom:1px solid var(--border)}.rank-sub:last-child{border-bottom:0}
 .rank-row{display:grid;grid-template-columns:16px minmax(110px,170px) 120px 1fr auto;gap:12px;align-items:center;width:100%;padding:12px 4px;border:0;background:none;color:inherit;font:inherit;text-align:left;cursor:pointer}
