@@ -87,11 +87,10 @@ async function post(service, alert) {
 }
 
 // Fan an alert out to every enabled webhook that wants this kind. Failures are recorded, never thrown.
-// 'system' alerts (the dashboard itself has a problem, e.g. YouTube pages can't be read) always go out.
 export function notify(alert) {
   for (const s of Object.keys(SERVICES)) {
     const c = read(s);
-    if (c.url && c.enabled && (alert.kind === 'system' || (c.kinds ?? KINDS).includes(alert.kind))) post(s, alert).catch(() => {});
+    if (c.url && c.enabled && (c.kinds ?? KINDS).includes(alert.kind)) post(s, alert).catch(() => {});
   }
 }
 

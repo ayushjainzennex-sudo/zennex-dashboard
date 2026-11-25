@@ -169,12 +169,13 @@ export function startScheduler() {
   startRankWorker(alert);
   // Before a self-update restart: stop the background work and hand jobs back.
   onBeforeRestart(stopScheduler);
-  // A YouTube page reader failing 3 times in a row (layout change, blocking) shows up in the alert feed and on Discord/Slack.
+  // A YouTube page reader failing 3 times in a row (layout change, blocking) shows up in the dashboard's alert feed
+  // only; it is never sent to Discord/Slack.
   onReaderHealth(
     (reader, error, fails) => alert('system', null, null, `Can't read YouTube ${READERS[reader] ?? reader} on ${NODE_NAME}`,
-      `${fails} failed reads in a row. Last error: ${error}\nIf this keeps happening, YouTube may have changed the page or is limiting this node.`, {rich: {severity: 'high', heading: `⚠ Can't read YouTube ${READERS[reader] ?? reader}`, summary: `${NODE_NAME}: ${fails} failed reads in a row. ${error}`, lines: [], more: 0, footer: 'Channel Studio'}}),
+      `${fails} failed reads in a row. Last error: ${error}\nIf this keeps happening, YouTube may have changed the page or is limiting this node.`, {push: false}),
     reader => alert('system', null, null, `YouTube ${READERS[reader] ?? reader} readable again on ${NODE_NAME}`, null, {push: false}));
-  const last =db.prepare(`SELECT finished_at FROM runs WHERE finished_at IS NOT NULL ORDER BY id DESC LIMIT 1`).get()?.finished_at;
+  const last = db.prepare(`SELECT finished_at FROM runs WHERE finished_at IS NOT NULL ORDER BY id DESC LIMIT 1`).get()?.finished_at;
   const firstIn = !last ? 0 : Math.max(0, INTERVAL - (Date.now() - new Date(last)));
   state.nextRun = Date.now() + firstIn;
   state.firstTimer = setTimeout(() => {

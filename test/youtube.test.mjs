@@ -47,7 +47,13 @@ test('About page: channel stats', () => {
 });
 
 test('About page: a page without stats is an error, not zeros', () => {
-  assert.throws(() => yt.parseAbout('<html>consent page</html>'), /stats were not found/);
+  assert.throws(() => yt.parseAbout('<html><meta property="og:title" content="X">"channelId":"UC1234567890123456789012"</html>'), e => /stats were not found/.test(e.message) && !e.notBroken);
+  // YouTube's page for a channel that doesn't exist echoes the id but has no og: tags.
+  assert.throws(() => yt.parseAbout('<html>"channelId":"UC1234567890123456789012" "alertRenderer"</html>'), e => e.notBroken === true);
+});
+
+test('About page: no channel on the page is "not found", not a broken reader', () => {
+  assert.throws(() => yt.parseAbout('<html>nothing here</html>'), e => e.message === 'Channel not found.' && e.notBroken === true);
 });
 
 test('Uploads feed: recent videos with exact dates', () => {

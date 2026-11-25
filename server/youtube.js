@@ -90,8 +90,13 @@ export const loadFeed = channelId => read('feed', async () => {
 export function parseAbout(html) {
   const field = key => new RegExp('"' + key + '":"((?:[^"\\\\]|\\\\.)*)"').exec(html)?.[1];
   const subscribersText = field('subscriberCountText'), viewsText = field('viewCountText'), videosText = field('videoCountText');
-  if (!subscribersText && !viewsText) throw new Error('Channel stats were not found on the page.');
   const channelId = /"channelId":"(UC[\w-]{22})"/.exec(html)?.[1];
+  if (!subscribersText && !viewsText) {
+    // No channel on the page (a mistyped or deleted channel: YouTube answers 200 with an error box, echoing the id
+    // but without the og: tags every real channel page has). That's about the input, not a broken reader.
+    if (!channelId || !/<meta property="og:title"/.test(html)) throw notBroken('Channel not found.');
+    throw new Error('Channel stats were not found on the page.');
+  }
   const about = html.slice(html.indexOf('aboutChannelViewModel'));
   return {
     channelId,
