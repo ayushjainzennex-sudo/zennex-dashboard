@@ -3,7 +3,7 @@
 // Uses each channel's stored uploads (c.pool: the latest 80 per channel, already scored), plus creators added only
 // here (server/thumbs.js), scored the same way against their own median per format.
 import React, {useEffect, useMemo, useRef, useState} from 'react';
-import {Avatar, DAY, ago, api, fmt, median, pref, setPref, short, thumbProps, toast} from '../shared.jsx';
+import {Avatar, DAY, ago, api, fmt, median, pref, setPref, short, toast} from '../shared.jsx';
 
 // A creator added only for this page, shaped like a channel so the rest of the page treats it the same.
 function asChannel(x) {
@@ -174,8 +174,23 @@ function Thumbnails({channels: tracked}) {
   const Chip = ({c}) => <button className={'tchip'+(on.has(c.id) ? ' on' : '')} style={{'--c':c.color}} aria-pressed={on.has(c.id)} onClick={() => toggle(c.id)} onContextMenu={e => creatorMenu(e, c)}>
     <Avatar channel={c} size={20}/><span>{c.name}</span>{c.kind === 'extra' ? <span className="tchip-x" role="button" aria-label={'Remove '+c.name} title="Remove from Thumbnails" onClick={e => { e.stopPropagation(); remove(c); }}>×</span> : null}</button>;
 
-  return <>
-    <section className="card">
+  return <div className="tlayout">
+    <div className="tmain">
+    <div className="toolbar thumb-bar">
+      <div className="seg" role="group" aria-label="Sort">{SORTS.map(([k, l]) => <button key={k} aria-pressed={sort === k} onClick={() => setSort(k)}>{l}</button>)}</div>
+      <div className="seg sm" role="group" aria-label="Format">{FORMATS.map(([k, l]) => <button key={k} aria-pressed={format === k} onClick={() => { setFormat(k); setShown(PAGE); }}>{l}</button>)}</div>
+      <div className="seg sm" role="group" aria-label="Period">{PERIODS.map(([k, l]) => <button key={k} aria-pressed={period === k} onClick={() => { setPeriod(k); setShown(PAGE); }}>{l}</button>)}</div>
+    </div>
+    {list.length ? <div className="thumb-wall">{list.slice(0, shown).map(v => <a key={v.ch.id+v.id} className="twall" href={watchUrl(v)} target="_blank" rel="noreferrer" onContextMenu={e => thumbMenu(e, v)}>
+      <div className="thumb"><HiRes v={v}/>
+        {v.short ? <span className="twall-tag">Short</span> : null}
+        {v.score != null && v.score >= 2 ? <span className="twall-score">{v.score.toFixed(1)}×</span> : null}</div>
+      <span className="video-title">{v.title}</span>
+      <span className="video-meta"><span className="dot" style={{background:v.ch.color}}/>{v.ch.name} · {short(v.views)} views · {ago(v.published)}</span>
+    </a>)}</div> : <div className="spark-empty">{on.size ? 'No uploads match these filters.' : 'Pick at least one creator.'}</div>}
+    </div>
+    <aside className="tside">
+    <section className="card tside-card">
       <div className="tcats" role="tablist" aria-label="Categories">
         <button role="tab" aria-selected={!cat} className={'tcat'+(!cat ? ' on' : '')} onClick={() => openCat(null)}>All creators</button>
         {categories.map(c => naming?.id === c.id ? <NameInput key={c.id} naming={naming} setNaming={setNaming} done={nameDone}/>
@@ -193,21 +208,19 @@ function Thumbnails({channels: tracked}) {
         <form className="tadd" onSubmit={add}><input value={input} onChange={e => setInput(e.target.value)} placeholder="@handle or channel link" aria-label="Add a creator"/><button className="btn" disabled={adding || !input.trim()}>{adding ? <span className="spinner"/> : '+'} Add</button></form></div>
       {own.length ? <><span className="kpi-label" style={{display:'block', margin:'14px 0 8px'}}>Your channels</span><div className="tchips">{own.map(c => <Chip key={c.id} c={c}/>)}</div></> : null}
     </section>
-    <div className="toolbar thumb-bar">
-      <div className="seg" role="group" aria-label="Sort">{SORTS.map(([k, l]) => <button key={k} aria-pressed={sort === k} onClick={() => setSort(k)}>{l}</button>)}</div>
-      <div className="seg sm" role="group" aria-label="Format">{FORMATS.map(([k, l]) => <button key={k} aria-pressed={format === k} onClick={() => { setFormat(k); setShown(PAGE); }}>{l}</button>)}</div>
-      <div className="seg sm" role="group" aria-label="Period">{PERIODS.map(([k, l]) => <button key={k} aria-pressed={period === k} onClick={() => { setPeriod(k); setShown(PAGE); }}>{l}</button>)}</div>
-    </div>
-    {list.length ? <div className="thumb-wall">{list.slice(0, shown).map(v => <a key={v.ch.id+v.id} className="twall" href={watchUrl(v)} target="_blank" rel="noreferrer" onContextMenu={e => thumbMenu(e, v)}>
-      <div className="thumb"><img {...thumbProps(v.thumbnail, '(max-width:640px) 90vw, 320px')} alt="" loading="lazy" decoding="async" referrerPolicy="no-referrer"/>
-        {v.short ? <span className="twall-tag">Short</span> : null}
-        {v.score != null && v.score >= 2 ? <span className="twall-score">{v.score.toFixed(1)}×</span> : null}</div>
-      <span className="video-title">{v.title}</span>
-      <span className="video-meta"><span className="dot" style={{background:v.ch.color}}/>{v.ch.name} · {short(v.views)} views · {ago(v.published)}</span>
-    </a>)}</div> : <div className="spark-empty">{on.size ? 'No uploads match these filters.' : 'Pick at least one creator.'}</div>}
+    </aside>
     {menu ? <Menu menu={menu} close={() => setMenu(null)}/> : null}
     {shown < list.length ? <button className="btn show-more-btn" onClick={() => setShown(n => n + PAGE)}>Show {Math.min(PAGE, list.length - shown)} more of {fmt(list.length - shown)}</button> : null}
-  </>;
+  </div>;
+}
+
+// Thumbnail at the best size YouTube has: 1280×720 (maxres), else 1280×720 (hq720), else 480×360 (hq).
+const SIZES = ['maxresdefault', 'hq720', 'hqdefault'];
+function HiRes({v}) {
+  const [i, setI] = useState(0);
+  const next = () => setI(n => Math.min(n + 1, SIZES.length - 1));
+  return <img src={`https://i.ytimg.com/vi/${v.id}/${SIZES[i]}.jpg`} alt="" loading="lazy" decoding="async" referrerPolicy="no-referrer"
+    onLoad={e => { if (e.currentTarget.naturalWidth <= 120 && i < SIZES.length - 1) next(); }} onError={next}/>;
 }
 
 // Inline name field for a new or renamed category: Enter saves, Esc cancels, leaving the field saves.

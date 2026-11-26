@@ -153,11 +153,11 @@ const Nodes = () => <>
   </article>)}</div></Card>
 </>;
 
-const ThumbWall = () => <>
-  <Card title={15} sub={20}><div className="tchips">{range(6).map(i => <Sk key={i} w={110 + (i * 29) % 50} h={32} r={16}/>)}</div></Card>
-  <Toolbar><Seg n={3} w={100}/><Seg n={3} w={64} h={34}/><Seg n={4} w={44} h={34}/></Toolbar>
-  <div className="thumb-wall">{range(12).map(i => <div key={i} className="twall"><Sk h="auto" r={12} style={{aspectRatio:'16/9'}}/><T w={vary(i, 70, 95)} lh={19} h={11}/><T w={vary(i+3, 40, 60)} lh={17} h={9}/></div>)}</div>
-</>;
+const ThumbWall = () => <div className="tlayout">
+  <div className="tmain"><Toolbar><Seg n={3} w={100}/><Seg n={3} w={64} h={34}/><Seg n={4} w={44} h={34}/></Toolbar>
+    <div className="thumb-wall">{range(9).map(i => <div key={i} className="twall"><Sk h="auto" r={14} style={{aspectRatio:'16/9'}}/><T w={vary(i, 70, 95)} lh={20} h={12}/><T w={vary(i+3, 40, 60)} lh={17} h={9}/></div>)}</div></div>
+  <aside className="tside"><Card title={30} sub={45} className="tside-card"><div className="tchips">{range(7).map(i => <Sk key={i} w={110 + (i * 29) % 50} h={32} r={16}/>)}</div></Card></aside>
+</div>;
 
 const PAGES = {thumbnails:ThumbWall, overview:Overview, insights:Insights, rankings:Rankings, report:Report, alerts:Alerts, planner:Planner, settings:Settings, database:Database, nodes:Nodes};
 
