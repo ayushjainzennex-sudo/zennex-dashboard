@@ -94,7 +94,7 @@ function NodesPage() {
     return () => { clearInterval(t); clearInterval(p); };
   }, []);
   if (err && !d) return <div className="card"><p className="error" role="alert">{err}</p><button className="btn" onClick={load}>Retry</button></div>;
-  if (!d) return <PageSkeleton/>;
+  if (!d) return <PageSkeleton page="nodes"/>;
   const run = async (k, fn) => { setBusy(k); try { setD(await fn()); } catch (e) { toast(e.message, {kind:'error'}); } finally { setBusy(null); } };
   const onMode = async (n, mode) => {
     if (mode === 'disabled' && !(await ask(`Disable "${n.name}"? It stops its current job and gives it to another node.`, 'Disable'))) return;

@@ -166,7 +166,8 @@ db.exec(`CREATE TABLE IF NOT EXISTS rivals (
 // Columns added after the first release.
 for (const sql of [
   `ALTER TABLE videos ADD COLUMN approx INTEGER NOT NULL DEFAULT 0`,   // 1 = date/views estimated from channel pages
-  `ALTER TABLE channels ADD COLUMN backfilled_at TEXT`
+  `ALTER TABLE channels ADD COLUMN backfilled_at TEXT`,
+  `ALTER TABLE channels ADD COLUMN deep_at TEXT`   // last backfill that also read older pages of uploads
 ]) { try { db.exec(sql); } catch {} }
 
 export const OWN = [

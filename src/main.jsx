@@ -5,6 +5,7 @@ import './style.css';
 import {Icon, Logo} from './icons.jsx';
 import {installGlass} from './glass.js';
 import {installSeg} from './seg.js';
+import {NavSkeleton} from './skeletons.jsx';
 import {REMOTE, fetchSnapshot, nodeFetch, onChange, state as remoteState, signIn, signOut, refreshNodes} from './remote.js';
 import {Avatar, ConfirmHost, DAY, PageSkeleton, ToastHost, ago, api, applyDensity, avatarAt, fmt, fresh, key, pref, reduceMotion, setPref, short, shortDate, thumbProps, toast, today, yt} from './shared.jsx';
 import {Overview} from './pages/overview.jsx';
@@ -26,6 +27,7 @@ const Planner = page(() => import('./pages/planner.jsx'), 'Planner');
 const Rankings = page(() => import('./pages/rankings.jsx'), 'Rankings');
 const Report = page(() => import('./pages/report.jsx'), 'Report');
 const Settings = page(() => import('./pages/settings.jsx'), 'Settings');
+const Thumbnails = page(() => import('./pages/thumbnails.jsx'), 'Thumbnails');
 
 const statuses = ['Idea','In production','Scheduled','Published'];
 
@@ -278,6 +280,9 @@ function App() {
       d.alerts.filter(a => a.id > seen.current && !a.read).slice(0, 3).forEach(a => new Notification(a.title, {body:a.body ?? '', tag:'yt-'+a.id}));
     seen.current = Math.max(0, ...d.alerts.map(a => a.id));
     setData(d);
+    // remembered so the next load's skeleton draws as many channel cards and sidebar rows as there are
+    const ownIds = d.channels.filter(c => c.kind === 'own').map(c => c.id);
+    setPref('skel', {own:ownIds.length, rivals:Object.fromEntries(ownIds.map(id => [id, d.channels.filter(c => c.rivalOf?.includes(id)).length]))});
   }
   const live = React.useRef(false);   // live data from a node has been shown at least once
   const reload = () => api('/api/dashboard').then(d => {
@@ -339,7 +344,7 @@ function App() {
   const owner = page.startsWith('competitors') ? own.find(o => 'competitors:'+o.id === page) ?? own[0] : null;
   const current = page.startsWith('ch:') ? [...own, ...competitors].find(c => 'ch:'+c.id === page) : null;
   const status = data?.status;
-  const titles = {nodes:'Nodes', database:'Database health', settings:'Settings', rankings:'Search rankings', overview:'Overview', competitors:'Competitors', insights:'Insights', report:'Weekly report', alerts:'Alerts', planner:'Planner'};
+  const titles = {nodes:'Nodes', database:'Database health', settings:'Settings', rankings:'Search rankings', overview:'Overview', competitors:'Competitors', insights:'Insights', report:'Weekly report', alerts:'Alerts', planner:'Planner', thumbnails:'Thumbnails'};
   const title = owner ? 'Competitors' : titles[page] ?? current?.name ?? 'Channel';
   const since = id => visits[id] ?? boot.current;
   const newVideos = (cs, t) => cs.reduce((n, c) => n + c.recent.filter(v => v.published > t).length, 0);
@@ -353,7 +358,7 @@ function App() {
   };
   const nav = (id, label, extra, count, hot) => { const f = fresh(id); return <button className="nav-item" aria-current={page === id ? 'page' : undefined} onClick={() => setPage(id)}>{extra}<span className="nav-text">{label}</span>{f ? <span className="fresh" title={f+' new since your last visit'}>+{f}</span> : null}{count ? <span className={'count'+(hot ? ' hot' : '')}>{count}</span> : null}</button>; };
   const paletteItems = !data ? [] : [
-    ...Object.entries({overview:'Overview', insights:'Insights', rankings:'Search rankings', report:'Weekly report', alerts:'Alerts', settings:'Settings', database:'Database health', nodes:'Nodes', planner:'Planner & lookup'}).map(([k, l]) => ({group:'Pages', label:l, run:() => setPage(k)})),
+    ...Object.entries({overview:'Overview', insights:'Insights', rankings:'Search rankings', report:'Weekly report', alerts:'Alerts', settings:'Settings', database:'Database health', nodes:'Nodes', planner:'Planner & lookup', thumbnails:'Thumbnails'}).map(([k, l]) => ({group:'Pages', label:l, run:() => setPage(k)})),
     ...own.map(c => ({group:'Your channels', label:c.name, hint:short(c.subscribers)+' subs', icon:<Avatar channel={c} size={20}/>, run:() => setPage('ch:'+c.id)})),
     ...own.map(c => ({group:'Your channels', label:c.name+' rivals', run:() => setPage('competitors:'+c.id)})),
     ...competitors.map(c => ({group:'Competitors', label:c.name, hint:c.rivalNames, icon:<Avatar channel={c} size={20}/>, run:() => setPage('ch:'+c.id)})),
@@ -375,12 +380,15 @@ function App() {
         <span className="nav-label">Dashboard</span>
         {nav('overview', 'Overview', <span className="nav-icon"><Icon name="overview"/></span>)}
         {nav('insights', 'Insights', <span className="nav-icon"><Icon name="insights"/></span>)}
+        {nav('thumbnails', 'Thumbnails', <span className="nav-icon"><Icon name="thumbnails"/></span>)}
         {nav('rankings', 'Rankings', <span className="nav-icon"><Icon name="rankings"/></span>, data?.rankings.categories.flatMap(c => c.subs).filter(s => s.status === 'weak' || s.status === 'missing').length, true)}
         {nav('report', 'Weekly report', <span className="nav-icon"><Icon name="report"/></span>)}
         {nav('alerts', 'Alerts', <span className="nav-icon"><Icon name="alerts"/></span>, data?.unread, true)}
         <span className="nav-label">Your channels</span>
+        {!data && <NavSkeleton n={pref('skel', {own:3}).own}/>}
         {own.map(c => <React.Fragment key={c.id}>{nav('ch:'+c.id, c.name, <Avatar channel={c} size={22}/>)}</React.Fragment>)}
         <span className="nav-label">Competitors</span>
+        {!data && <NavSkeleton n={pref('skel', {own:3}).own} icon={18}/>}
         {own.map(o => <React.Fragment key={o.id}>{nav('competitors:'+o.id, o.name+' rivals', <span className="nav-icon" style={{color:o.color}}><Icon name="flag"/></span>, o.rivals)}</React.Fragment>)}
         <span className="nav-label">Tools</span>
         {nav('settings', 'Settings', <span className="nav-icon"><Icon name="settings"/></span>)}
@@ -409,10 +417,11 @@ function App() {
         </div>
       </header>
       <ConnectionBanner conn={conn} retryIn={retryIn} stale={status?.lastRun?.finished_at} onRetry={() => { attempt.current = 0; setRetryIn(0); }}/>
-      {!data && <PageSkeleton/>}
-      <Boundary resetKey={page}><Suspense fallback={<PageSkeleton/>}><div key={page} className="page-enter">
+      {!data && <PageSkeleton page={page}/>}
+      <Boundary resetKey={page}><Suspense fallback={<PageSkeleton page={page}/>}><div key={page} className="page-enter">
       {data && page === 'overview' && <Overview own={own} open={setPage} rail={<OverviewRail data={data} own={own} competitors={competitors} open={setPage} onRefresh={refresh} onSearch={() => setPalette(true)}/>}/>}
       {data && page === 'insights' && <Insights channels={data.channels}/>}
+      {data && page === 'thumbnails' && <Thumbnails channels={data.channels}/>}
       {data && page === 'settings' && <Settings data={data} call={call}/>}
       {data && page === 'database' && <DatabasePage/>}
       {data && page === 'nodes' && <NodesPage/>}

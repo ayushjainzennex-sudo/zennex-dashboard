@@ -125,29 +125,60 @@ export function parseAge(text) {
   const unit = m[2].toLowerCase().replace(/s$/, '');
   return Number(m[1]) * (AGE[unit] ?? AGE[m[2].toLowerCase()] ?? 0) * 1000;
 }
+const videoItems = data => collect(data, 'lockupViewModel').map(v => {
+  const parts = v.metadata?.lockupMetadataViewModel?.metadata?.contentMetadataViewModel?.metadataRows?.flatMap(r => r.metadataParts ?? []) ?? [];
+  const views = parts.find(p => /view/i.test(p.accessibilityLabel ?? p.text?.content ?? ''));
+  const label = p => p.accessibilityLabel ?? p.text?.content;
+  return {id: v.contentId, title: v.metadata?.lockupMetadataViewModel?.title?.content, short: false,
+    views: count(views?.text?.content), ageMs: parts.length > 1 ? parseAge(label(parts.at(-1))) : parts.map(p => parseAge(label(p))).find(a => a != null)};
+}).filter(v => /^[\w-]{11}$/.test(v.id ?? ''));
+const shortItems = data => collect(data, 'shortsLockupViewModel').map(v => ({
+  id: v.onTap?.innertubeCommand?.reelWatchEndpoint?.videoId, title: v.overlayMetadata?.primaryText?.content, short: true,
+  views: count(v.overlayMetadata?.secondaryText?.content)
+})).filter(v => /^[\w-]{11}$/.test(v.id ?? ''));
+// The token for the tab's next page ("load more"), if there is one.
+export const nextToken = data => collect(data, 'continuationItemRenderer').find(c => c?.trigger === 'CONTINUATION_TRIGGER_ON_ITEM_SHOWN' && c.continuationEndpoint?.continuationCommand?.token)?.continuationEndpoint.continuationCommand.token ?? null;
+
 export function parseVideosTab(html) {
   const data = initialData(html);
   if (!data) throw new Error('The Videos tab was not readable.');
-  return collect(data, 'lockupViewModel').map(v => {
-    const parts = v.metadata?.lockupMetadataViewModel?.metadata?.contentMetadataViewModel?.metadataRows?.flatMap(r => r.metadataParts ?? []) ?? [];
-    const views = parts.find(p => /view/i.test(p.accessibilityLabel ?? p.text?.content ?? ''));
-    const label = p => p.accessibilityLabel ?? p.text?.content;
-    return {id: v.contentId, title: v.metadata?.lockupMetadataViewModel?.title?.content, short: false,
-      views: count(views?.text?.content), ageMs: parts.length > 1 ? parseAge(label(parts.at(-1))) : parts.map(p => parseAge(label(p))).find(a => a != null)};
-  }).filter(v => /^[\w-]{11}$/.test(v.id ?? ''));
+  return videoItems(data);
 }
 export function parseShortsTab(html) {
   const data = initialData(html);
   if (!data) throw new Error('The Shorts tab was not readable.');
-  return collect(data, 'shortsLockupViewModel').map(v => ({
-    id: v.onTap?.innertubeCommand?.reelWatchEndpoint?.videoId, title: v.overlayMetadata?.primaryText?.content, short: true,
-    views: count(v.overlayMetadata?.secondaryText?.content)
-  })).filter(v => /^[\w-]{11}$/.test(v.id ?? ''));
+  return shortItems(data);
 }
-export async function loadUploads(path) {
-  const tab = (name, parse) => read(name, async () => parse(await getPage('https://www.youtube.com/' + path + '/' + name, {}, 'Channel not found.')))
+
+// One tab, following its "load more" pages up to `pages` pages in all (about 30 uploads each).
+// Older pages come from YouTube's own browse endpoint, called the way the page itself does.
+async function readTab(path, name, items, pages) {
+  const html = await getPage('https://www.youtube.com/' + path + '/' + name, {}, 'Channel not found.');
+  const data = initialData(html);
+  if (!data) throw new Error('The ' + name + ' tab was not readable.');
+  const out = items(data), seen = new Set(out.map(v => v.id));
+  const key = /"INNERTUBE_API_KEY":"([^"]+)"/.exec(html)?.[1], version = /"INNERTUBE_CLIENT_VERSION":"([^"]+)"/.exec(html)?.[1];
+  let token = nextToken(data);
+  for (let page = 1; page < pages && token && key && version; page++) {
+    try {
+      const response = await fetch('https://www.youtube.com/youtubei/v1/browse?prettyPrint=false&key=' + key, {
+        method: 'POST', signal: AbortSignal.timeout(15000), headers: {...headers, 'content-type': 'application/json'},
+        body: JSON.stringify({context: {client: {clientName: 'WEB', clientVersion: version, hl: 'en', gl: 'US'}}, continuation: token})
+      });
+      if (!response.ok) break;
+      const more = await response.json(), list = items(more).filter(v => !seen.has(v.id));
+      if (!list.length) break;
+      list.forEach(v => { seen.add(v.id); out.push(v); });
+      token = nextToken(more);
+    } catch { break; }   // older pages are a bonus: keep what we have
+  }
+  return out;
+}
+// `pages` > 1 also reads older uploads (used for the weekly deep backfill).
+export async function loadUploads(path, pages = 1) {
+  const tab = (name, items) => read(name, () => readTab(path, name, items, pages))
     .catch(() => []); // one tab failing shouldn't lose the other
-  const [videos, shorts] = await Promise.all([tab('videos', parseVideosTab), tab('shorts', parseShortsTab)]);
+  const [videos, shorts] = await Promise.all([tab('videos', videoItems), tab('shorts', shortItems)]);
   return {videos, shorts};
 }
 

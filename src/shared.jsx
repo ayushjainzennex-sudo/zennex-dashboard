@@ -141,7 +141,38 @@ function VideoList({videos, rate, score}) {
   </a>)}{!videos.length && <p className="muted">No uploads loaded yet.</p>}</div>;
 }
 
-function OutlierCard({channels, title, note}) {
+// Windows for re-scoring outliers: candidates AND their baseline both come from videos published in the window.
+const OUT_WINDOWS = [
+  ['7d', '1 week', () => Date.now() - 7*DAY, '1W'], ['28d', '28 days', () => Date.now() - 28*DAY, '28D'],
+  ['month', 'This month', () => { const d = new Date(); return new Date(d.getFullYear(), d.getMonth(), 1).getTime(); }, 'Month'],
+  ['90d', '3 months', () => Date.now() - 90*DAY, '3M'], ['6m', '6 months', () => Date.now() - 182*DAY, '6M'],
+  ['1y', '1 year', () => Date.now() - 365*DAY, '1Y'], ['all', 'All stored', () => 0, 'All'],
+];
+// Outliers on one channel within a chosen window, scored on the server at equal age (see windowOutliers in server/api.js).
+function WindowedOutliers({c, title}) {
+  const [win, setWin] = usePref('outlierWindow', '28d');
+  const [r, setR] = useState(null), [err, setErr] = useState(false);
+  const w = OUT_WINDOWS.find(x => x[0] === win) ?? OUT_WINDOWS[1];
+  useEffect(() => {
+    let live = true; setR(null); setErr(false);
+    api(`/api/channels/${c.id}/outliers?from=${encodeURIComponent(new Date(w[2]()).toISOString())}`).then(d => live && setR(d), () => live && setErr(true));
+    return () => { live = false; };
+  }, [c.id, win]);
+  const partial = r?.oldest && Date.parse(r.oldest) > w[2]() + 7*DAY;
+  const list = (r?.outliers ?? []).slice(0, 8).map(v => ({...v, ch:c}));
+  return <section className="card">
+    <div className="card-head"><div><h2>{title}</h2><span className="muted">Baseline: the median views of uploads of the same format published in this window. Score: a video's views ÷ that baseline (2× or more is an outlier).</span></div>
+      <div className="seg sm" role="group" aria-label="Outlier window">{OUT_WINDOWS.map(([k, l, , tag]) => <button key={k} aria-pressed={win === k} title={l} onClick={() => setWin(k)}>{tag}</button>)}</div></div>
+    {r && <p className="muted small" style={{marginTop:0}}>Baseline {r.baseline.video != null ? short(r.baseline.video)+' views per video ('+r.baseline.videos+')' : 'videos: too few'} · {r.baseline.short != null ? short(r.baseline.short)+' per Short ('+r.baseline.shorts+')' : 'Shorts: too few'} · {r.scoredCount} of {r.count} scored{r.unscored.new ? ` · ${r.unscored.new} under a day old` : ''}{r.unscored.few ? ` · ${r.unscored.few} in a format with under 3 uploads` : ''}{partial ? ` · stored uploads only go back to ${shortDate(r.oldest)}` : ''}.</p>}
+    {err ? <div className="spark-empty">Couldn't load scores for this window.</div>
+      : !r ? <div className="skeleton"><div className="list">{[0,1,2].map(i => <div key={i} className="list-row"><span className="sk" style={{width:96, height:54, borderRadius:8}}/><span className="sk" style={{height:12, borderRadius:6, width:'70%'}}/><span className="sk" style={{height:14, width:50, borderRadius:7}}/></div>)}</div></div>
+      : list.length ? <VideoList videos={list} score/> : <div className="spark-empty">No video in this window got 2× the baseline of its format.</div>}
+  </section>;
+}
+
+function OutlierCard({channels, title, note, windowed}) {
+  const [win, setWin] = usePref('outlierWindow', 'all');
+  if (windowed && channels.length === 1) return <WindowedOutliers c={channels[0]} title={title}/>;
   const list = channels.flatMap(c => c.outliers.map(v => ({...v, ch:c}))).sort((a,b) => b.score - a.score).slice(0, 8);
   return <section className="card">
     <div className="card-head"><div><h2>{title}</h2><span className="muted">{note}</span></div></div>
@@ -290,17 +321,8 @@ function Toast({t, close, gone}) {
   </div>;
 }
 
-// ---------- skeletons ----------
-const Sk = ({w = '100%', h = 12, r = 6, style}) => <span className="sk" style={{width:w, height:h, borderRadius:r, ...style}}/>;
-
-function PageSkeleton() {
-  return <div className="skeleton" aria-busy="true" aria-label="Loading">
-    <div className="kpi-grid">{[0,1,2,3].map(i => <div key={i} className="kpi"><Sk w="40%" h={10}/><Sk w="65%" h={26} style={{margin:'10px 0 8px'}}/><Sk w="50%" h={10}/></div>)}</div>
-    <div className="sk-cards">{[0,1,2].map(i => <div key={i} className="card"><div className="row"><Sk w={40} h={40} r={20}/><div style={{flex:1, display:'grid', gap:8}}><Sk w="50%" h={14}/><Sk w="30%" h={10}/></div></div>
-      <Sk h={70} r={10} style={{marginTop:18}}/><div style={{display:'grid', gap:8, marginTop:16}}>{[0,1,2].map(j => <Sk key={j} w={90-j*15+'%'} h={10}/>)}</div></div>)}</div>
-    <div className="card" style={{display:'grid', gap:12}}>{[0,1,2,3,4].map(i => <div key={i} className="row"><Sk w={96} h={54} r={8}/><div style={{flex:1, display:'grid', gap:8}}><Sk w="70%" h={12}/><Sk w="35%" h={10}/></div></div>)}</div>
-  </div>;
-}
+// ---------- skeletons: see skeletons.jsx ----------
+import {PageSkeleton} from './skeletons.jsx';
 
 // ---------- animated number (restarts from the current value, so it can be interrupted) ----------
 const reduceMotion = () => typeof matchMedia !== 'undefined' && matchMedia('(prefers-reduced-motion: reduce)').matches;

@@ -76,7 +76,7 @@ function DatabasePage() {
   const load = () => api('/api/db/health').then(x => { setH(x); setForm(f => f ?? x.settings); setErr(''); }).catch(e => setErr(e.message));
   useEffect(() => { load(); const t = setInterval(load, 30e3); return () => clearInterval(t); }, []);
   if (err && !h) return <div className="card"><p className="error" role="alert">{err}</p><button className="btn" onClick={load}>Retry</button></div>;
-  if (!h) return <PageSkeleton/>;
+  if (!h) return <PageSkeleton page="database"/>;
   const act = async (a, label) => {
     if (a === 'cleanup' && !(await ask('Remove data older than the retention settings now? A backup is made first.', 'Clean up'))) return;
     setBusy(a);

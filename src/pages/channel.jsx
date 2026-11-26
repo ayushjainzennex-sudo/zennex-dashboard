@@ -39,7 +39,7 @@ function LookupPage({channelId, own, onTrack, onTracked}) {
   const load = () => { setErr(''); api('/api/lookup/'+channelId).then(x => x.tracked ? onTracked(x.tracked) : setD(x)).catch(e => setErr(e.message)); };
   useEffect(load, [channelId]);
   if (err) return <div className="card"><p className="error" role="alert">{err}</p><button className="btn" onClick={load}>Retry</button></div>;
-  if (!d) return <PageSkeleton/>;
+  if (!d) return <PageSkeleton page="ch:"/>;
   const track = async o => { setAdding(o.id); try { await onTrack(d.handle ?? d.channelId, o.id); toast(`${d.title} added as a competitor of ${o.name}.`, {kind:'ok'}); } catch (e) { toast(e.message, {kind:'error'}); } finally { setAdding(null); } };
   return <>
     <section className="hero">
@@ -272,7 +272,7 @@ function ChannelPage({c, onRemove}) {
       </section>
     </div>
 
-    <OutlierCard channels={[c]} title="Outliers on this channel" note={`Compared with this channel's last ${c.poolSize} stored videos, by format. The baseline widens as the database collects more uploads.`}/>
+    <OutlierCard windowed channels={[c]} title="Outliers on this channel" note={`Compared with this channel's last ${c.poolSize} stored videos, by format. The baseline widens as the database collects more uploads.`}/>
     <section className="card">
       <div className="card-head"><h2>Recent uploads</h2>
         <div className="seg" role="group" aria-label="Sort videos">{[['new','Newest'],['views','Most viewed'],['trend','Trending'],['outlier','Outlier score']].map(([k,l]) => <button key={k} aria-pressed={sort===k} onClick={() => setSort(k)}>{l}</button>)}</div>

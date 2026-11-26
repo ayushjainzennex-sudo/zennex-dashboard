@@ -14,6 +14,7 @@ import {backupNow, backupSettings, setMirror, startBackups, stopBackups} from '.
 import {dbHealth, runAction, saveDbSettings, startMaintenance, stopMaintenance} from './dbhealth.js';
 import {onBeforeRestart} from './updater.js';
 import {startSnapshots, stopSnapshots} from './snapshot.js';
+import {thumbCreators, addThumbCreator, removeThumbCreator, thumbPrefs, saveThumbPrefs} from './thumbs.js';
 
 const HOUR = 3600e3, DAY = 24 * HOUR;
 export const INTERVAL = 60 * 60 * 1000;
@@ -40,6 +41,33 @@ function alert(kind, channel, video, title, body, {push = true, rich} = {}) {
 }
 
 // ---------- scoring ----------
+// Outliers within a time window: the baseline is the median views of the same format (video or Short) published in
+// the window, and each video's score is its views ÷ that baseline. Uploads under a day old are left out of both
+// (their views are still climbing); a format with under 3 uploads in the window gets no score.
+function windowOutliers(channelId, from) {
+  const since = from && !isNaN(Date.parse(from)) ? new Date(from).toISOString() : '0000';
+  const now = Date.now();
+  const vids = db.prepare(`SELECT v.id, v.title, v.short, COALESCE(d.published, v.published) published, v.thumbnail, v.views, v.approx
+    FROM videos v LEFT JOIN video_dates d ON d.id=v.id WHERE v.channel=? AND v.views IS NOT NULL AND COALESCE(d.published, v.published) >= ?`).all(channelId, since)
+    .map(v => ({...v, age: now - Date.parse(v.published)}));
+  const ready = vids.filter(v => v.age >= DAY);
+  const baseFor = {}; for (const f of [0, 1]) { const list = ready.filter(v => !!v.short === !!f).map(v => v.views); baseFor[f] = list.length >= 3 ? median(list) : null; }
+  const scored = vids.map(v => {
+    if (v.age < DAY) return {...v, score: null, why: 'new'};
+    const baseline = baseFor[v.short ? 1 : 0], score = baseline ? v.views / baseline : null;
+    return {...v, score, baseline, outlier: score != null && score >= OUTLIER};
+  });
+  const n = f => ready.filter(v => !!v.short === !!f).length;
+  return {
+    count: vids.length, scoredCount: scored.filter(v => v.score != null).length,
+    oldest: db.prepare(`SELECT min(published) t FROM videos WHERE channel=?`).get(channelId)?.t ?? null,
+    unscored: {new: scored.filter(v => v.why === 'new').length, few: scored.filter(v => v.score == null && v.why !== 'new').length},
+    baseline: {video: baseFor[0], short: baseFor[1], videos: n(0), shorts: n(1)},
+    outliers: scored.filter(v => v.outlier).sort((a, b) => b.score - a.score).slice(0, 12)
+      .map(({id, title, short, published, thumbnail, views, approx, score, baseline, age}) =>
+        ({id, title, short: !!short, published, thumbnail, views, approx: !!approx, score, baseline, ageDays: age / DAY, outlier: true}))
+  };
+}
 const poolQ = db.prepare(`SELECT * FROM videos WHERE channel=? AND published IS NOT NULL ORDER BY published DESC LIMIT 80`);
 function scorer(pool) {
   return v => {
@@ -89,7 +117,7 @@ async function store(channel, data) {
 }
 
 // Once a day, pull ~30 videos + ~30 Shorts from the channel pages to widen the baseline beyond the 15-item RSS feed.
-async function backfill(channel, uploads) {
+async function backfill(channel, uploads, deep = false) {
   const now = Date.now(), ts = iso();
   const existing = new Map(db.prepare(`SELECT id, published, views, approx FROM videos WHERE channel=?`).all(channel.id).map(r => [r.id, r]));
   const insert = db.prepare(`INSERT OR IGNORE INTO videos (id, channel, title, short, published, thumbnail, views, likes, updated_at, approx) VALUES (?,?,?,?,?,?,?,NULL,?,1)`);
@@ -113,13 +141,17 @@ async function backfill(channel, uploads) {
       insert.run(s.id, channel.id, s.title, 1, iso(Math.min(t, now)), thumb(s.id), s.views, ts);
     });
     db.prepare(`UPDATE channels SET backfilled_at=? WHERE id=?`).run(ts, channel.id);
+    if (deep) db.prepare(`UPDATE channels SET deep_at=? WHERE id=?`).run(ts, channel.id);
   });
 }
 
 async function refreshOne(channel) {
   try {
     await store(channel, await loadChannel(channel.path));
-    if (!channel.backfilled_at || Date.now() - new Date(channel.backfilled_at) > DAY) await backfill(channel, await loadUploads(channel.path));
+    // Daily: the first page of each tab. Weekly: up to 10 pages (~300 videos and ~300 Shorts), so long outlier
+    // windows have a year or so of uploads to compare against.
+    const deep = !channel.deep_at || Date.now() - new Date(channel.deep_at) > 7 * DAY;
+    if (deep || !channel.backfilled_at || Date.now() - new Date(channel.backfilled_at) > DAY) await backfill(channel, await loadUploads(channel.path, deep ? 10 : 1), deep);
     return true;
   } catch (err) { db.prepare(`UPDATE channels SET error=? WHERE id=?`).run(err.message, channel.id); return false; }
 }
@@ -500,6 +532,11 @@ const routes = compile([
   ['POST', '/api/refresh', async () => { await runBatch('manual'); return dashboard(); }],
 
   // Competitors.
+  ['GET', '/api/thumbs/creators', () => thumbCreators()],
+  ['GET', '/api/thumbs/prefs', () => thumbPrefs()],
+  ['PUT', '/api/thumbs/prefs', async ({body}) => saveThumbPrefs(await body())],
+  ['POST', '/api/thumbs/creators', async ({body}) => addThumbCreator((await body()).input)],
+  ['DELETE', '/api/thumbs/creators/:id(UC[\\w-]{22})', ({params}) => removeThumbCreator(params.id)],
   ['POST', '/api/competitors', async ({body}) => {
     const {input, own} = await body();
     const owner = db.prepare(`SELECT id, name FROM channels WHERE id=? AND kind='own'`).get(Number(own));
@@ -558,6 +595,7 @@ const routes = compile([
   }],
   ['DELETE', '/api/plans/:id([\\w-]+)', ({params}) => { db.prepare(`DELETE FROM plans WHERE id=?`).run(params.id); return dashboard(); }],
 
+  ['GET', '/api/channels/:id(\\d+)/outliers', ({params, query}) => windowOutliers(Number(params.id), query.get('from'))],
   // Videos: views over time (from the snapshots) plus what's stored, and details for any public video.
   ['GET', '/api/videos/:id([\\w-]{11})/history', ({params}) => {
     const v = db.prepare(`SELECT v.id, v.title, v.short, v.published, v.approx, v.views, v.likes, c.name channel FROM videos v JOIN channels c ON c.id=v.channel WHERE v.id=?`).get(params.id);
