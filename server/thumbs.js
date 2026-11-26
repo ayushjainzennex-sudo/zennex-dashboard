@@ -63,6 +63,7 @@ export async function saveThumbPrefs(p) {
   if (Array.isArray(p?.categories)) clean.categories = p.categories.slice(0, 50).filter(c => c && typeof c.name === 'string').map(c => ({
     id: String(c.id ?? '').slice(0, 20), name: c.name.trim().slice(0, 40),
     members: (Array.isArray(c.members) ? c.members : []).slice(0, 500).map(x => typeof x === 'number' ? x : String(x).slice(0, 40))}));
+  if (typeof p?.at === 'number') clean.at = p.at;   // when the browser made this change, so the newer copy wins
   if (p?.category === null || typeof p?.category === 'string') clean.category = p.category?.slice(0, 20) ?? null;
   const next = {...await thumbPrefs(), ...clean};
   await remoteRun(`INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value`, [PREFS, JSON.stringify(next)]);

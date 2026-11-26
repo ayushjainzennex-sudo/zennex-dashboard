@@ -23,12 +23,29 @@ const DEFAULTS = {picked:null, sort:'recent', format:'video', period:'28', categ
 function useThumbPrefs() {
   const [p, set] = useState(() => ({...DEFAULTS, picked:pref('thumbCreators', null), ...pref('thumbPrefs', {})}));   // thumbCreators: the earlier key
   const timer = useRef(0), touched = useRef(false);
-  useEffect(() => { api('/api/thumbs/prefs').then(r => { if (!touched.current && r && Object.keys(r).length) { set(x => ({...x, ...r})); setPref('thumbPrefs', {...pref('thumbPrefs', {}), ...r}); } }, () => {}); }, []);
+  // Sends this browser's copy to the database. A save that fails (no node, offline) stays marked as unsent and is
+  // retried on the next visit, when a node answers again or the tab regains focus.
+  const send = next => api('/api/thumbs/prefs', {method:'POST', body:JSON.stringify(next)})
+    .then(() => setPref('thumbPrefsUnsent', false), () => setPref('thumbPrefsUnsent', true));
+  useEffect(() => {
+    // the newer copy wins: the database's, unless this browser has changes it couldn't send yet
+    api('/api/thumbs/prefs').then(r => {
+      const local = pref('thumbPrefs', {});
+      if (pref('thumbPrefsUnsent', false) && (local.at ?? 0) >= (r?.at ?? 0)) return send(local);
+      if (!touched.current && r && Object.keys(r).length && (r.at ?? 0) >= (local.at ?? 0)) { set(x => ({...x, ...r})); setPref('thumbPrefs', {...local, ...r}); }
+    }, () => {});
+    const retry = () => { if (pref('thumbPrefsUnsent', false)) send(pref('thumbPrefs', {})); };
+    addEventListener('focus', retry); addEventListener('online', retry);
+    return () => { removeEventListener('focus', retry); removeEventListener('online', retry); };
+  }, []);
   const update = patch => set(x => {
-    const next = {...x, ...(typeof patch === 'function' ? patch(x) : patch)}; touched.current = true; setPref('thumbPrefs', next);
-    clearTimeout(timer.current); timer.current = setTimeout(() => api('/api/thumbs/prefs', {method:'PUT', body:JSON.stringify(next)}).catch(() => {}), 400);
+    const next = {...x, ...(typeof patch === 'function' ? patch(x) : patch), at:Date.now()}; touched.current = true;
+    setPref('thumbPrefs', next); setPref('thumbPrefsUnsent', true);
+    clearTimeout(timer.current); timer.current = setTimeout(() => send(next), 400);
     return next;
   });
+  // a change made just before leaving the page is sent right away instead of being lost with the timer
+  useEffect(() => () => { if (timer.current) { clearTimeout(timer.current); if (pref('thumbPrefsUnsent', false)) send(pref('thumbPrefs', {})); } }, []);
   return [p, update];
 }
 
