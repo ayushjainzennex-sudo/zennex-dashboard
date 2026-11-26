@@ -26,35 +26,44 @@ function NodeCard({n, self, serving, busy, onMode, onRemove, onUpdate, latency})
   const work = st.work ?? {}, workTotal = Object.values(work).reduce((a, b) => a + b, 0);
   const limited = st.rateLimitedUntil && new Date(st.rateLimitedUntil) > Date.now();
   const offline = n.health === 'offline';
+  const pct = v => v == null ? null : Math.max(0, Math.min(100, v));
+  const host = u => u.replace(/^https?:\/\//, '');
+  const Meter = ({v, warn = 85}) => v == null ? null : <span className={'nmeter'+(v >= warn ? ' hot' : '')}><i style={{width:v+'%'}}/></span>;
   return <article className={'node '+n.health+(n.mode !== 'active' ? ' mode-'+n.mode : '')}>
     <header className="node-head">
       <span className="node-dot" aria-hidden="true"/>
       <div className="node-title">
-        <strong>{n.name}</strong>{REMOTE ? serving && <span className="pill">Serving this page</span> : self && <span className="pill">This node</span>}
-        {st.tunnel && <span className={'pill '+(st.tunnel.state === 'up' ? '' : 'warn')} title={st.tunnel.error ?? 'Reachable from the internet through a Cloudflare tunnel'}>{st.tunnel.state === 'up' ? 'Internet ✓' : 'Tunnel '+st.tunnel.state}</span>}
-        {n.mode !== 'active' && <span className={'pill '+n.mode}>{n.mode === 'draining' ? 'Draining' : 'Disabled'}</span>}
-        {n.outdated && <span className="pill warn" title="Its server code differs from the newest node. Update it so all nodes behave the same.">Different version</span>}
-        {u?.state === 'available' && !offline && <span className="pill warn" title={u.latestMessage ? 'Newest on GitHub: '+u.latestMessage : ''}>Update available{u.behind ? ' · '+u.behind+' new' : ''}</span>}
-        {(u?.state === 'updating' || u?.state === 'restarting') && !offline && <span className="pill"><span className="spinner sm"/> {u.step ?? 'Updating'}</span>}
-        <div className="muted small">{HEALTH[n.health]} · heartbeat {agoS(n.last_seen)}{n.lan_url && n.lan_url !== n.url && <> · <a href={n.lan_url} target="_blank" rel="noreferrer">{n.lan_url.replace(/^https?:\/\//, '')}</a></>}{n.url && <> · <a href={n.url} target="_blank" rel="noreferrer">{n.url.replace(/^https?:\/\//, '')}</a></>}</div>
+        <strong title={n.name}>{n.name}</strong>
+        <span className="muted small">{HEALTH[n.health]} · {offline ? 'last seen '+ago(n.last_seen) : 'heartbeat '+agoS(n.last_seen)}</span>
       </div>
-      <div className="node-ping" title="Response time from this browser">{offline ? '—' : latency === undefined ? <span className="spinner"/> : latency == null ? <span className="down small">unreachable</span> : <><b>{latency}</b><span className="muted small"> ms</span></>}</div>
+      <div className="node-ping" title="Response time from this browser">{offline ? <span className="muted">—</span> : latency === undefined ? <span className="spinner"/> : latency == null ? <span className="down small">unreachable</span> : <><b>{latency}</b><span className="muted small"> ms</span></>}</div>
     </header>
-    <div className="node-now">{offline ? <span className="muted">Last seen {ago(n.last_seen)}</span>
+    <div className="node-pills">
+      {REMOTE ? serving && <span className="pill">Serving this page</span> : self && <span className="pill">This node</span>}
+      {st.tunnel && <span className={'pill '+(st.tunnel.state === 'up' ? 'ok' : 'warn')} title={st.tunnel.error ?? 'Reachable from the internet through a Cloudflare tunnel'}>{st.tunnel.state === 'up' ? 'Online' : 'Tunnel '+st.tunnel.state}</span>}
+      {n.mode !== 'active' && <span className={'pill '+n.mode}>{n.mode === 'draining' ? 'Draining' : 'Disabled'}</span>}
+      {n.outdated && <span className="pill warn" title="Its server code differs from the newest node. Update it so all nodes behave the same.">Different version</span>}
+      {u?.state === 'available' && !offline && <span className="pill warn" title={u.latestMessage ? 'Newest on GitHub: '+u.latestMessage : ''}>Update available{u.behind ? ' · '+u.behind+' new' : ''}</span>}
+      {(u?.state === 'updating' || u?.state === 'restarting') && !offline && <span className="pill"><span className="spinner sm"/> {u.step ?? 'Updating'}</span>}
+    </div>
+    <div className={'node-now'+(st.current && !offline && !limited ? ' busy' : '')}>{offline ? <span className="muted">Not reachable</span>
       : limited ? <span className="warn-text">YouTube is limiting this node · resumes {new Date(st.rateLimitedUntil).toLocaleTimeString('en-IN', {hour:'2-digit', minute:'2-digit'})}</span>
-      : st.current ? <><span className="spinner sm"/> {st.current}</> : <span className="muted">{n.mode === 'active' ? 'Idle, waiting for the next job' : n.mode === 'draining' ? 'Finished its work; taking no new jobs' : 'Not taking any jobs'}</span>}</div>
+      : st.current ? <><span className="spinner sm"/><span className="node-now-text" title={st.current}>{st.current}</span></> : <span className="muted">{n.mode === 'active' ? 'Idle, waiting for the next job' : n.mode === 'draining' ? 'Finished its work; taking no new jobs' : 'Not taking any jobs'}</span>}</div>
     <dl className="node-stats">
-      <div><dt>CPU</dt><dd>{st.cpu == null ? '—' : st.cpu+'%'}<span className="muted small"> · {st.cpus ?? '—'} cores</span></dd></div>
-      <div><dt>Memory</dt><dd>{memUsed == null ? '—' : Math.round(memUsed * 100)+'%'}<span className="muted small"> · app {mb(st.rss)}</span></dd></div>
-      <div><dt>Disk free</dt><dd>{gb(diskFree)}</dd></div>
+      <div><dt>CPU</dt><dd>{st.cpu == null ? '—' : st.cpu+'%'}</dd><Meter v={pct(st.cpu)}/><span className="nsub">{st.cpus ?? '—'} cores</span></div>
+      <div><dt>Memory</dt><dd>{memUsed == null ? '—' : Math.round(memUsed * 100)+'%'}</dd><Meter v={pct(memUsed == null ? null : memUsed * 100)} warn={90}/><span className="nsub">app {mb(st.rss)}</span></div>
+      <div><dt>Disk free</dt><dd>{gb(diskFree)}</dd><span className="nsub">&nbsp;</span></div>
       <div><dt>Up for</dt><dd>{upFor(st.uptime)}</dd></div>
-      <div><dt>Work last hour</dt><dd>{workTotal ? fmt(workTotal) : '0'}<span className="muted small">{workTotal ? ' · '+Object.entries(work).map(([k, v]) => v+' '+k).join(', ') : ''}</span></dd></div>
-      <div><dt>Database writes</dt><dd>{st.db?.syncError ? <span className="down">sync failing</span> : st.db?.writeMs != null ? st.db.writeMs+' ms' : '—'}</dd></div>
+      <div><dt title="Jobs done in the last hour">Jobs / hour</dt><dd>{workTotal ? fmt(workTotal) : '0'}</dd>{workTotal ? <span className="nsub" title={Object.entries(work).map(([k, v]) => v+' '+k).join(', ')}>{Object.entries(work).map(([k, v]) => v+' '+k).join(' · ')}</span> : null}</div>
+      <div><dt>DB write</dt><dd>{st.db?.syncError ? <span className="down">failing</span> : st.db?.writeMs != null ? st.db.writeMs+' ms' : '—'}</dd></div>
     </dl>
-    {n.leases.length > 0 && <div className="node-leases muted small">Holding: {n.leases.map(l => jobName(l.name)).join(', ')}</div>}
-    {u && !offline && (u.lastError || u.blocked || (u.state === 'unavailable' && u.reason)) && <div className="node-leases muted small">{u.lastError ? <span className="down">{u.lastError.message}</span> : u.blocked ?? u.reason}</div>}
+    {n.leases.length > 0 && <div className="node-leases"><span className="nsub">Holding</span>{n.leases.map(l => <span key={l.name} className="node-job">{jobName(l.name)}</span>)}</div>}
+    {u && !offline && (u.lastError || u.blocked || (u.state === 'unavailable' && u.reason)) && <div className="node-note small">{u.lastError ? <span className="down">{u.lastError.message}</span> : <span className="muted">{u.blocked ?? u.reason}</span>}</div>}
     <footer className="node-foot">
-      <span className="muted small">{u?.commit ? u.commit+' · ' : ''}{n.version} · {st.node ?? ''} · {n.platform ?? ''}</span>
+      <div className="node-meta">
+        <span className="node-links">{n.lan_url && n.lan_url !== n.url && <a href={n.lan_url} target="_blank" rel="noreferrer" title={n.lan_url}>LAN · {host(n.lan_url)}</a>}{n.url && <a href={n.url} target="_blank" rel="noreferrer" title={n.url}>Public link</a>}</span>
+        <span className="muted small" title={[u?.commit, n.version, st.node, n.platform].filter(Boolean).join(' · ')}>{[n.version, st.node, n.platform].filter(Boolean).join(' · ')}</span>
+      </div>
       <div className="row">
         {u?.state === 'available' && !offline && <button className="btn sm primary" disabled={!!busy || !!u.blocked} title={u.blocked ?? 'Install '+(u.latestMessage ?? 'the newest version')} onClick={() => onUpdate(n)}>Update</button>}
         {n.mode === 'active' && !offline && <button className="btn sm" disabled={!!busy} onClick={() => onMode(n, 'draining')}>Drain</button>}

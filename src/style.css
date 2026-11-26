@@ -1272,3 +1272,33 @@ main:has(.tlayout){max-width:1760px}
 .thumb-wall{grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:28px 20px}
 .twall .video-title{font-size:15px}
 .twall .thumb{border-radius:calc(14px * var(--sq))}
+
+/* node card, tidied */
+.node{gap:14px;padding:18px}
+.node-head{align-items:center}
+.node-dot{margin-top:0}
+.node-title{display:grid;gap:2px;flex-wrap:nowrap}
+.node-title strong{font-size:16px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.node-title .muted{flex-basis:auto}
+.node-pills{display:flex;flex-wrap:wrap;gap:6px}
+.node-pills:empty{display:none}
+.node-pills .pill.ok{color:var(--up);background:color-mix(in srgb,var(--up) 14%,transparent)}
+.node-now{padding:10px 12px;border-radius:12px;background:var(--panel-2);min-width:0}
+.node-now.busy{font-weight:500}
+.node-now-text{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.node-stats{gap:14px 16px}
+.node-stats>div{display:grid;gap:3px;align-content:start}
+.node-stats dt{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
+.node-stats dd{font-size:18px;font-weight:600;margin:0;font-variant-numeric:tabular-nums;white-space:nowrap}
+.nsub{font-size:12px;color:var(--muted);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.nmeter{display:block;height:4px;border-radius:2px;background:var(--panel-2);overflow:hidden}
+.nmeter i{display:block;height:100%;border-radius:2px;background:var(--up);transition:width .4s}
+.nmeter.hot i{background:#ff9f0a}
+.node-leases{display:flex;flex-wrap:wrap;align-items:center;gap:6px;border-top:1px solid var(--border);padding-top:12px}
+.node-leases .nsub{margin-right:2px}
+.node-job{font-size:12px;padding:2px 10px;border-radius:999px;background:var(--panel-2);color:var(--text)}
+.node-note{margin-top:-4px}
+.node-meta{display:grid;gap:2px;min-width:0}
+.node-links{display:flex;gap:10px;font-size:12px;min-width:0}
+.node-links a{color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.node-links a:hover{color:var(--text)}
