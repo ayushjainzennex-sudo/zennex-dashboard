@@ -59,6 +59,11 @@ export async function saveThumbPrefs(p) {
   const clean = {};
   if (p?.picked === null || Array.isArray(p?.picked)) clean.picked = p.picked?.slice(0, 500).map(x => typeof x === 'number' ? x : String(x).slice(0, 40)) ?? null;
   for (const k of ['sort', 'format', 'period']) if (typeof p?.[k] === 'string') clean[k] = p[k].slice(0, 12);
+  // categories: named groups of creators, e.g. {id, name: 'Laptops', members: [4, 'x:UC…']}
+  if (Array.isArray(p?.categories)) clean.categories = p.categories.slice(0, 50).filter(c => c && typeof c.name === 'string').map(c => ({
+    id: String(c.id ?? '').slice(0, 20), name: c.name.trim().slice(0, 40),
+    members: (Array.isArray(c.members) ? c.members : []).slice(0, 500).map(x => typeof x === 'number' ? x : String(x).slice(0, 40))}));
+  if (p?.category === null || typeof p?.category === 'string') clean.category = p.category?.slice(0, 20) ?? null;
   const next = {...await thumbPrefs(), ...clean};
   await remoteRun(`INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value`, [PREFS, JSON.stringify(next)]);
   return next;

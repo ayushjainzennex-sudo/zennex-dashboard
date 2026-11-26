@@ -1247,3 +1247,13 @@ select:hover{border-color:color-mix(in srgb,var(--accent) 45%,var(--border))}
 .ctx-menu button.danger{color:var(--down,#ff5c57)}
 .ctx-menu hr{border:0;border-top:1px solid var(--border);margin:4px 8px}
 @media (prefers-reduced-motion:reduce){.ctx-menu{animation:none}}
+
+/* thumbnail categories */
+.tcats{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:-2px 0 16px;padding-bottom:14px;border-bottom:1px solid var(--border)}
+.tcat{display:inline-flex;align-items:center;gap:6px;padding:6px 14px;border:1px solid transparent;border-radius:999px;corner-shape:round;background:var(--panel-2);color:var(--muted);font:inherit;font-size:13px;font-weight:500;cursor:pointer;transition:background-color .2s,color .2s,box-shadow .2s}
+.tcat:hover{color:var(--text)}
+.tcat.on{background:var(--text);color:var(--bg,var(--panel))}
+.tcat-n{font-size:11px;opacity:.6;font-variant-numeric:tabular-nums}
+.tcat-new{background:none;border:1px dashed var(--border)}
+.tcat-input{width:200px;padding:6px 14px;border-radius:999px;font-size:13px}
+.link-btn.danger{color:var(--down,#ff5c57)}

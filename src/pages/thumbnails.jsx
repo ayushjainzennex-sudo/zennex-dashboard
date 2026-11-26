@@ -17,7 +17,7 @@ const SORTS = [['recent', 'Newest'], ['views', 'Most viewed'], ['score', 'Outlie
 const FORMATS = [['all', 'All'], ['video', 'Videos'], ['short', 'Shorts']];
 const PERIODS = [['7', '7D', 7], ['28', '28D', 28], ['90', '3M', 90], ['all', 'All', Infinity]];
 const PAGE = 48;
-const DEFAULTS = {picked:null, sort:'recent', format:'video', period:'28'};
+const DEFAULTS = {picked:null, sort:'recent', format:'video', period:'28', categories:[], category:null};
 
 // Filters live in this browser (instant on load) and in the database (same after a refresh on any device or site).
 function useThumbPrefs() {
@@ -25,7 +25,7 @@ function useThumbPrefs() {
   const timer = useRef(0), touched = useRef(false);
   useEffect(() => { api('/api/thumbs/prefs').then(r => { if (!touched.current && r && Object.keys(r).length) { set(x => ({...x, ...r})); setPref('thumbPrefs', {...pref('thumbPrefs', {}), ...r}); } }, () => {}); }, []);
   const update = patch => set(x => {
-    const next = {...x, ...patch}; touched.current = true; setPref('thumbPrefs', next);
+    const next = {...x, ...(typeof patch === 'function' ? patch(x) : patch)}; touched.current = true; setPref('thumbPrefs', next);
     clearTimeout(timer.current); timer.current = setTimeout(() => api('/api/thumbs/prefs', {method:'PUT', body:JSON.stringify(next)}).catch(() => {}), 400);
     return next;
   });
@@ -74,12 +74,39 @@ function Thumbnails({channels: tracked}) {
   useEffect(() => { api('/api/thumbs/creators').then(l => setExtra(l.map(asChannel)), () => {}).finally(() => setReady(true)); }, []);
   const channels = useMemo(() => [...tracked, ...extra], [tracked, extra]);
   const rivals = tracked.filter(c => c.kind === 'competitor'), own = tracked.filter(c => c.kind === 'own');
-  const [prefs, update] = useThumbPrefs(), {picked, sort, format, period} = prefs;   // picked null = competitors + added creators
+  const [prefs, update] = useThumbPrefs(), {picked, sort, format, period, categories = [], category} = prefs;   // picked null = competitors + added creators
+  // Categories: named groups of creators. With one open, the chips show and edit that category's members.
+  const cat = categories.find(c => c.id === category) ?? null;
+  const [naming, setNaming] = useState(null);   // {id: category id or 'new', name}
+  const saveCats = (list, patch = {}) => update({categories:list, ...patch});
+  const openCat = id => { update({category:id}); setShown(PAGE); };
+  const nameDone = () => {
+    const name = naming?.name.trim(); if (!naming) return;
+    setNaming(null);
+    if (!name) return;
+    if (categories.some(c => c.name.toLowerCase() === name.toLowerCase() && c.id !== naming.id)) return toast('There is already a category called '+name, {kind:'error'});
+    if (naming.id === 'new') { const id = Date.now().toString(36); saveCats([...categories, {id, name, members:naming.members ?? []}], {category:id}); toast('Created '+name+(naming.members?.length ? '' : ' · click creators to add them')); }
+    else saveCats(categories.map(c => c.id === naming.id ? {...c, name} : c));
+  };
+  const deleteCat = c => {
+    const before = categories;
+    saveCats(categories.filter(x => x.id !== c.id), category === c.id ? {category:null} : {});
+    toast('Deleted '+c.name, {action:{label:'Undo', run:() => saveCats(before, {category:c.id})}});
+  };
+  const setMember = (c, id, inIt) => update(p => ({categories:(p.categories ?? []).map(x => x.id === c.id ? {...x, members:inIt ? [...new Set([...x.members, id])] : x.members.filter(m => m !== id)} : x)}));
+  const catMenu = (e, c) => at(e, c.name, [
+    {label:'Open', run:() => openCat(c.id)},
+    {label:'Rename', run:() => setNaming({id:c.id, name:c.name})},
+    {label:'Duplicate', run:() => setNaming({id:'new', name:c.name+' copy', members:c.members})},
+    {label:'Clear creators', run:() => saveCats(categories.map(x => x.id === c.id ? {...x, members:[]} : x))},
+    null,
+    {label:'Delete category', danger:true, run:() => deleteCat(c)},
+  ]);
   const setPicked = v => update({picked:v}), setSort = v => update({sort:v}), setFormat = v => update({format:v}), setPeriod = v => update({period:v});
   const [shown, setShown] = useState(PAGE), [menu, setMenu] = useState(null);
   // ids of creators that no longer exist are ignored, but only once the added creators have loaded (so they aren't dropped)
   const ids = new Set(channels.map(c => c.id)), saved = picked && (ready ? picked.filter(id => ids.has(id)) : picked);
-  const on = new Set(saved ?? [...rivals, ...extra].map(c => c.id));
+  const on = new Set(cat ? cat.members.filter(id => !ready || ids.has(id)) : saved ?? [...rivals, ...extra].map(c => c.id));
   const add = async e => {
     e.preventDefault(); if (!input.trim() || adding) return;
     setAdding(true);
@@ -91,8 +118,8 @@ function Thumbnails({channels: tracked}) {
     try { await api('/api/thumbs/creators/'+c.channelId, {method:'DELETE'}); setExtra(l => l.filter(x => x.id !== c.id)); if (picked) setPicked(picked.filter(id => id !== c.id)); toast('Removed '+c.name); }
     catch (err) { toast(err.message, {kind:'error'}); }
   };
-  const toggle = id => { const s = new Set(on); s.has(id) ? s.delete(id) : s.add(id); setPicked([...s]); setShown(PAGE); };
-  const pick = list => { setPicked(list.map(c => c.id)); setShown(PAGE); };
+  const toggle = id => { if (cat) return setMember(cat, id, !on.has(id)); const s = new Set(on); s.has(id) ? s.delete(id) : s.add(id); setPicked([...s]); setShown(PAGE); };
+  const pick = list => { if (cat) saveCats(categories.map(x => x.id === cat.id ? {...x, members:list.map(c => c.id)} : x)); else setPicked(list.map(c => c.id)); setShown(PAGE); };
   const openCreator = c => c.kind === 'extra' ? window.open('https://www.youtube.com/channel/'+c.channelId, '_blank', 'noreferrer') : (location.hash = 'ch:'+c.id);
   const at = (e, title, items) => { e.preventDefault(); setMenu({x:e.clientX, y:e.clientY, title, items}); };
   const creatorMenu = (e, c) => at(e, c.name, [
@@ -101,6 +128,8 @@ function Thumbnails({channels: tracked}) {
     {label:'Show everyone except this', run:() => pick(channels.filter(x => x.id !== c.id))},
     null,
     {label:c.kind === 'extra' ? 'Open channel on YouTube' : 'Open channel page', run:() => openCreator(c)},
+    ...(categories.length ? [null, ...categories.map(k => { const inIt = k.members.includes(c.id); return {label:(inIt ? '✓ In ' : 'Add to ')+k.name, run:() => setMember(k, c.id, !inIt)}; })] : []),
+    {label:'New category with this creator…', run:() => setNaming({id:'new', name:'', members:[c.id]})},
     ...(c.kind === 'extra' ? [null, {label:'Remove from Thumbnails', danger:true, run:() => remove(c)}] : [])
   ]);
   const thumbMenu = (e, v) => at(e, v.title, [
@@ -123,15 +152,24 @@ function Thumbnails({channels: tracked}) {
       .filter(v => v.thumbnail && (format === 'all' || (format === 'short') === !!v.short) && new Date(v.published) >= from);
     const by = {recent: (a, b) => new Date(b.published) - new Date(a.published), views: (a, b) => (b.views ?? 0) - (a.views ?? 0), score: (a, b) => (b.score ?? -1) - (a.score ?? -1)};
     return all.sort(by[sort] ?? by.recent);
-  }, [channels, picked, sort, format, period, extra]);
+  }, [channels, picked, sort, format, period, extra, cat]);
 
   const Chip = ({c}) => <button className={'tchip'+(on.has(c.id) ? ' on' : '')} style={{'--c':c.color}} aria-pressed={on.has(c.id)} onClick={() => toggle(c.id)} onContextMenu={e => creatorMenu(e, c)}>
     <Avatar channel={c} size={20}/><span>{c.name}</span>{c.kind === 'extra' ? <span className="tchip-x" role="button" aria-label={'Remove '+c.name} title="Remove from Thumbnails" onClick={e => { e.stopPropagation(); remove(c); }}>×</span> : null}</button>;
 
   return <>
     <section className="card">
-      <div className="card-head"><div><h2>Creators</h2><span className="muted">{on.size} selected · {list.length} thumbnail{list.length === 1 ? '' : 's'}</span></div>
-        <div className="row"><button className="link-btn" onClick={() => pick([...rivals, ...extra])}>Default</button><button className="link-btn" onClick={() => pick(channels)}>Everyone</button><button className="link-btn" onClick={() => pick([])}>None</button></div></div>
+      <div className="tcats" role="tablist" aria-label="Categories">
+        <button role="tab" aria-selected={!cat} className={'tcat'+(!cat ? ' on' : '')} onClick={() => openCat(null)}>All creators</button>
+        {categories.map(c => naming?.id === c.id ? <NameInput key={c.id} naming={naming} setNaming={setNaming} done={nameDone}/>
+          : <button key={c.id} role="tab" aria-selected={cat?.id === c.id} className={'tcat'+(cat?.id === c.id ? ' on' : '')} onClick={() => openCat(c.id)}
+              onDoubleClick={() => setNaming({id:c.id, name:c.name})} onContextMenu={e => catMenu(e, c)} title="Double-click to rename, right-click for more">
+              {c.name}<span className="tcat-n">{c.members.filter(id => !ready || ids.has(id)).length}</span></button>)}
+        {naming?.id === 'new' ? <NameInput naming={naming} setNaming={setNaming} done={nameDone}/>
+          : <button className="tcat tcat-new" onClick={() => setNaming({id:'new', name:''})}>+ New category</button>}
+      </div>
+      <div className="card-head"><div><h2>{cat ? cat.name : 'Creators'}</h2><span className="muted">{cat ? 'Click creators to add them to or remove them from this category · ' : ''}{on.size} selected · {list.length} thumbnail{list.length === 1 ? '' : 's'}</span></div>
+        <div className="row">{cat ? <><button className="link-btn" onClick={() => setNaming({id:cat.id, name:cat.name})}>Rename</button><button className="link-btn danger" onClick={() => deleteCat(cat)}>Delete</button></> : null}<button className="link-btn" onClick={() => pick([...rivals, ...extra])}>{cat ? 'Competitors' : 'Default'}</button><button className="link-btn" onClick={() => pick(channels)}>Everyone</button><button className="link-btn" onClick={() => pick([])}>None</button></div></div>
       <div className="tchips">{rivals.map(c => <Chip key={c.id} c={c}/>)}</div>
       <span className="kpi-label" style={{display:'block', margin:'14px 0 8px'}}>Added for thumbnails only</span>
       <div className="tchips">{extra.map(c => <Chip key={c.id} c={c}/>)}
@@ -153,6 +191,13 @@ function Thumbnails({channels: tracked}) {
     {menu ? <Menu menu={menu} close={() => setMenu(null)}/> : null}
     {shown < list.length ? <button className="btn show-more-btn" onClick={() => setShown(n => n + PAGE)}>Show {Math.min(PAGE, list.length - shown)} more of {fmt(list.length - shown)}</button> : null}
   </>;
+}
+
+// Inline name field for a new or renamed category: Enter saves, Esc cancels, leaving the field saves.
+function NameInput({naming, setNaming, done}) {
+  return <input className="tcat-input" autoFocus value={naming.name} placeholder="Category name, e.g. Laptops" maxLength={40}
+    onChange={e => setNaming({...naming, name:e.target.value})} onBlur={done}
+    onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); done(); } if (e.key === 'Escape') setNaming(null); }}/>;
 }
 
 export {Thumbnails};
