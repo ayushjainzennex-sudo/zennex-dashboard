@@ -3,6 +3,7 @@
 // Uses each channel's stored uploads (c.pool: the latest 80 per channel, already scored), plus creators added only
 // here (server/thumbs.js), scored the same way against their own median per format.
 import React, {useEffect, useMemo, useRef, useState} from 'react';
+import {createPortal} from 'react-dom';
 import {Avatar, DAY, ago, api, fmt, median, pref, setPref, short, toast} from '../shared.jsx';
 
 // A creator added only for this page, shaped like a channel so the rest of the page treats it the same.
@@ -79,10 +80,12 @@ function Menu({menu, close}) {
     addEventListener('pointerdown', off, true); addEventListener('keydown', key); addEventListener('scroll', close, true); addEventListener('resize', close); addEventListener('blur', close);
     return () => { removeEventListener('pointerdown', off, true); removeEventListener('keydown', key); removeEventListener('scroll', close, true); removeEventListener('resize', close); removeEventListener('blur', close); };
   }, [menu]);
-  return <div ref={ref} className="ctx-menu" role="menu" style={{left:menu.x, top:menu.y}} onContextMenu={e => e.preventDefault()}>
+  // Rendered into <body>: an animated or blurred ancestor would otherwise turn `position:fixed` into
+  // "fixed to that ancestor" in Chrome, putting the menu in the wrong place.
+  return createPortal(<div ref={ref} className="ctx-menu" role="menu" style={{left:menu.x, top:menu.y}} onContextMenu={e => e.preventDefault()}>
     {menu.title ? <div className="ctx-title">{menu.title}</div> : null}
     {menu.items.map((it, i) => it ? <button key={i} role="menuitem" className={it.danger ? 'danger' : ''} onClick={() => { close(); it.run(); }}>{it.label}</button> : <hr key={i}/>)}
-  </div>;
+  </div>, document.body);
 }
 
 function Thumbnails({channels: tracked}) {
