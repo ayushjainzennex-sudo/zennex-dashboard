@@ -5,7 +5,7 @@ import './style.css';
 import {Icon, Logo} from './icons.jsx';
 import {installGlass} from './glass.js';
 import {installSeg} from './seg.js';
-import {REMOTE, nodeFetch, onChange, state as remoteState, signIn, signOut, refreshNodes} from './remote.js';
+import {REMOTE, fetchSnapshot, nodeFetch, onChange, state as remoteState, signIn, signOut, refreshNodes} from './remote.js';
 import {Avatar, ConfirmHost, DAY, PageSkeleton, ToastHost, ago, api, applyDensity, avatarAt, fmt, fresh, key, pref, reduceMotion, setPref, short, shortDate, thumbProps, toast, today, yt} from './shared.jsx';
 import {Overview} from './pages/overview.jsx';
 
@@ -204,10 +204,13 @@ if (typeof document !== 'undefined') {
 
 // ---------- connection banner ----------
 function ConnectionBanner({conn, retryIn, onRetry, stale}) {
+  const r = useRemote();
   if (conn === 'ok') return null;
   const msg = conn === 'offline' ? 'You’re offline.' : REMOTE ? 'None of your nodes is answering. Is one of the PCs on?' : 'Can’t reach the dashboard server.';
+  const note = conn === 'snapshot' ? `Showing the copy saved ${r.snapshotAt ? ago(r.snapshotAt) : 'earlier'} in the database. It’s read-only until a node is back.`
+    : stale ? 'Showing data from '+ago(stale)+'.' : '';
   return <div className={'conn-banner '+conn} role="alert">
-    <span className="conn-dot"/><span><b>{msg}</b> {stale ? 'Showing data from '+ago(stale)+'.' : ''} {retryIn > 0 ? 'Retrying in '+retryIn+'s…' : 'Retrying…'}</span>
+    <span className="conn-dot"/><span><b>{msg}</b> {note} {retryIn > 0 ? 'Retrying in '+retryIn+'s…' : 'Retrying…'}</span>
     <button className="btn" onClick={onRetry} disabled={retryIn === 0}>{retryIn === 0 ? <span className="spinner"/> : 'Retry now'}</button>
   </div>;
 }
@@ -276,13 +279,18 @@ function App() {
     seen.current = Math.max(0, ...d.alerts.map(a => a.id));
     setData(d);
   }
+  const live = React.useRef(false);   // live data from a node has been shown at least once
   const reload = () => api('/api/dashboard').then(d => {
-    apply(d);
+    apply(d); live.current = true;
     if (connRef.current !== 'ok') toast('Back online. Data is up to date.', {kind:'ok'});
     connRef.current = 'ok'; attempt.current = 0; setConn('ok'); setRetryIn(-1);
-  }).catch(err => {
+  }).catch(async err => {
     if (err.kind === 'http') return toast(err.message, {kind:'error'});
-    connRef.current = navigator.onLine === false ? 'offline' : 'down'; setConn(connRef.current);
+    // On Vercel with no node answering: show the copy saved in the shared database (unless live data is already
+    // on screen, which is newer), and keep retrying so the page goes live as soon as a node is back.
+    const snap = REMOTE && !live.current && err.kind !== 'auth' && navigator.onLine !== false ? await fetchSnapshot() : null;
+    if (snap) apply(snap);
+    connRef.current = snap ? 'snapshot' : navigator.onLine === false ? 'offline' : 'down'; setConn(connRef.current);
     const wait = Math.min(60, 5 * 2 ** attempt.current++); setRetryIn(wait);
   });
   // Auto-retry countdown while disconnected; reconnecting the network retries at once.
@@ -474,8 +482,8 @@ function RemoteBadge() {
   const switchNode = async () => { setBusy(true); try { const x = await refreshNodes(); toast('Using '+x.name+' ('+x.ms+' ms).', {kind:'ok'}); } catch (e) { toast(e.message, {kind:'error'}); } finally { setBusy(false); } };
   return <div className="remote-badge">
     <span className={'sync-dot'+(n ? ' live' : ' off')}/>
-    <div><strong>{n ? 'Via '+n.name : 'Finding a node…'}</strong>
-      <span>{n ? (n.ms != null ? n.ms+' ms · ' : '')+r.nodes.filter(x => x.ms != null).length+' node'+(r.nodes.filter(x => x.ms != null).length === 1 ? '' : 's')+' online' : 'connecting'}</span>
+    <div><strong>{n ? 'Via '+n.name : r.snapshotAt ? 'Saved copy · no node online' : 'Finding a node…'}</strong>
+      <span>{n ? (n.ms != null ? n.ms+' ms · ' : '')+r.nodes.filter(x => x.ms != null).length+' node'+(r.nodes.filter(x => x.ms != null).length === 1 ? '' : 's')+' online' : r.snapshotAt ? 'read-only · '+ago(r.snapshotAt) : 'connecting'}</span>
       <span className="row" style={{gap:10}}><button className="link-btn" disabled={busy} onClick={switchNode}>{busy ? 'Checking…' : 'Re-check'}</button><button className="link-btn" onClick={() => signOut()}>Sign out</button></span></div>
   </div>;
 }

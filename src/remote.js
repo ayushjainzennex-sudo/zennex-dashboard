@@ -29,7 +29,8 @@ export function signOut() { store.set(KEY, null); store.set(PICK, null); current
 
 // ---------- choosing a node ----------
 let nodes = [], current = null, choosing = null, bad = new Map(); // node id -> time it failed
-export const state = () => ({signedIn: !!pass(), node: current, nodes});
+let snapshotAt = null;   // set while the page shows the saved copy instead of live data
+export const state = () => ({signedIn: !!pass(), node: current, nodes, snapshotAt});
 
 async function time(url) {
   const t0 = performance.now();
@@ -56,6 +57,18 @@ export function refreshNodes() { current = null; return node(); }
 // Re-time the nodes every few minutes so the page moves to a faster one if things change.
 if (REMOTE && typeof window !== 'undefined') setInterval(() => { if (pass() && !document.hidden) refreshNodes().catch(() => {}); }, 3 * 60e3);
 
+// When no node is online: the dashboard copy the nodes keep in the shared database (read-only, a few minutes old).
+// Returns null if there is no copy or it can't be read.
+export async function fetchSnapshot() {
+  if (!REMOTE || !pass()) return null;
+  const r = await fetch('/api/snapshot', {headers: {Authorization: 'Bearer ' + pass()}, cache: 'no-store'}).catch(() => null);
+  if (r?.status === 401) { signOut(); return null; }
+  if (!r?.ok) return null;
+  const data = await r.json().catch(() => null);
+  if (data) { snapshotAt = r.headers.get('X-Snapshot-At'); emit(); }
+  return data;
+}
+
 // fetch() for API paths ("/api/..."): to the chosen node, with the pass.
 export async function nodeFetch(path, init = {}) {
   if (!REMOTE) return fetch(path, init);
@@ -66,6 +79,7 @@ export async function nodeFetch(path, init = {}) {
     try {
       const r = await fetch(n.url + path, {...init, headers: {...init.headers, Authorization: 'Bearer ' + pass()}});
       if (r.status === 401) { signOut(); throw Object.assign(new Error('Please sign in again.'), {auth: true}); }
+      if (snapshotAt) { snapshotAt = null; emit(); }   // a node answered: live data again
       return r;
     } catch (err) {
       if (err.auth || err.name === 'TimeoutError' || err.name === 'AbortError') throw err;

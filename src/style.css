@@ -1168,3 +1168,7 @@ thead th{background:transparent}
 .seg.seg-dragging,.seg.seg-dragging>button{cursor:grabbing;user-select:none;-webkit-user-select:none}
 .seg.seg-dragging>button{color:var(--muted)}
 .seg.seg-dragging>button.seg-under{color:var(--text)}
+
+/* showing the saved copy (no node online): an amber note rather than the red "can't connect" alarm */
+.conn-banner.snapshot{border-color:color-mix(in srgb,#f5a524 60%,transparent);background:color-mix(in srgb,#f5a524 10%,var(--panel))}
+.conn-banner.snapshot .conn-dot{background:#f5a524;animation:none}

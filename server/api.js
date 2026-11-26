@@ -13,6 +13,7 @@ import {digestLines} from './watchdog.js';
 import {backupNow, backupSettings, setMirror, startBackups, stopBackups} from './backup.js';
 import {dbHealth, runAction, saveDbSettings, startMaintenance, stopMaintenance} from './dbhealth.js';
 import {onBeforeRestart} from './updater.js';
+import {startSnapshots, stopSnapshots} from './snapshot.js';
 
 const HOUR = 3600e3, DAY = 24 * HOUR;
 export const INTERVAL = 60 * 60 * 1000;
@@ -167,6 +168,7 @@ export function startScheduler() {
   startBackups();
   startMaintenance();
   startRankWorker(alert);
+  startSnapshots(dashboard);   // a copy in the shared database for when no node is online
   // Before a self-update restart: stop the background work and hand jobs back.
   onBeforeRestart(stopScheduler);
   // A YouTube page reader failing 3 times in a row (layout change, blocking) shows up in the dashboard's alert feed
@@ -213,7 +215,7 @@ async function maybeDigest() {
   markDigestSent();
 }
 
-export function stopScheduler() { clearTimeout(state.firstTimer); clearInterval(state.timer); stopRankWorker(); stopBackups(); stopMaintenance(); stopSync(); stopHeartbeat(); }
+export function stopScheduler() { clearTimeout(state.firstTimer); clearInterval(state.timer); stopRankWorker(); stopBackups(); stopMaintenance(); stopSync(); stopHeartbeat(); stopSnapshots(); }
 
 // ---------- analytics ----------
 const snapAt = db.prepare(`SELECT subscribers s, total_views v, video_count n, ts FROM channel_snapshots WHERE channel=? AND ts<=? ORDER BY ts DESC LIMIT 1`);
