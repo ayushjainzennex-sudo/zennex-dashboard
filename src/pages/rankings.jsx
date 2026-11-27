@@ -1,8 +1,8 @@
 import React, {useState, useEffect, useMemo} from 'react';
-import {ago, avg, fmt, fresh, short, shortDate, toast, usePref, yt} from '../shared.jsx';
+import {Avatar, ago, avg, fmt, fresh, short, shortDate, toast, usePref, yt} from '../shared.jsx';
 
 // ---------- rankings ----------
-const rankClass = r => r == null ? 'rk-none' : r <= 2 ? 'rk-top' : r <= 5 ? 'rk-mid' : 'rk-low';
+const rankClass = r => r == null ? 'rk-none' : r === 1 ? 'rk-top' : r <= 3 ? 'rk-mid' : 'rk-low';   // #1 glowing green, #2–3 yellow, #4+ glowing red
 
 const rankText = q => q.error ? 'Check failed' : !q.ts ? 'Not checked' : q.rank ? '#'+q.rank : 'Not found';
 
@@ -82,7 +82,9 @@ function BudgetRow({s, cat, rk, busy, open, onToggle, onCheck, onEdit, onDelete,
   const inTop = done.filter(q => q.rank != null && q.rank <= rk.top).length;
   const need = Math.floor(done.length / 2) + 1;
   const ch = cat.channel_name;
-  const v = !done.length ? ['', 'Not checked'] : s.status === 'missing' ? ['bad', 'Not ranking'] : s.status === 'weak' ? ['warn', 'Needs work'] : ['good', 'On target'];
+  // "Listed on top" only when our video is #1 on at least 70% of the searches checked; top-2 without that is "In top 2"
+  const p1 = done.filter(q => q.rank === 1).length, onTop = done.length && p1 / done.length >= 0.7;
+  const v = !done.length ? ['', 'Not checked'] : s.status === 'missing' ? ['bad', 'Not ranking'] : onTop ? ['good', 'Listed on top'] : s.status === 'weak' ? ['warn', 'Needs work'] : ['ok', 'In top ' + rk.top];
   return <>
     <tr className={'rank-tr'+(open ? ' open' : '')} onClick={onToggle}>
       <td><span className="chev-sm">{open ? '▾' : '▸'}</span><strong>{s.name}</strong></td>
@@ -112,11 +114,15 @@ function BudgetRow({s, cat, rk, busy, open, onToggle, onCheck, onEdit, onDelete,
 
 function Rankings({data, own, call, setNotice, undo}) {
   const rk = data.rankings;
-  const [catId, setCatId] = useState(rk.categories[0]?.id);
+  // Channel first, then that channel's categories. Each category already belongs to one channel.
+  const [chanPick, setChan] = usePref('rankChannel', null);
+  const chan = own.find(o => o.id === chanPick) ?? own.find(o => rk.categories.some(c => c.channel === o.id)) ?? own[0];
+  const cats = rk.categories.filter(c => c.channel === chan?.id);
+  const [catId, setCatId] = useState(cats[0]?.id);
   const [editing, setEditing] = useState(null);
   const [open, setOpen] = useState(null);
   const [busy, setBusy] = useState(null);
-  const cat = rk.categories.find(c => c.id === catId) ?? rk.categories[0];
+  const cat = cats.find(c => c.id === catId) ?? cats[0];
   const run = async (k, fn) => { setBusy(k); try { await fn(); } catch (err) { setNotice(err.message); } finally { setBusy(null); } };
   const w = rk.worker, man = w.manual;
   const check = body => run('check', () => call('/api/rankings/check', {method:'POST', body:JSON.stringify(body)}));
@@ -130,8 +136,8 @@ function Rankings({data, own, call, setNotice, undo}) {
   async function addCategory(e) {
     e.preventDefault();
     const d = new FormData(e.currentTarget);
-    const res = await call('/api/rankings/categories', {method:'POST', body:JSON.stringify({name:d.get('name'), channel:Number(d.get('channel'))})}).catch(err => setNotice(err.message));
-    if (res) { setCatId(res.rankings.categories.at(-1)?.id); setEditing(null); }
+    const res = await call('/api/rankings/categories', {method:'POST', body:JSON.stringify({name:d.get('name'), channel:chan.id})}).catch(err => setNotice(err.message));
+    if (res) { setCatId(res.rankings.categories.filter(c => c.channel === chan.id).at(-1)?.id); setEditing(null); }
   }
   const subs = cat?.subs ?? [];
   const queries = subs.flatMap(s => s.queries).filter(q => q.ts && !q.error);
@@ -146,17 +152,20 @@ function Rankings({data, own, call, setNotice, undo}) {
   const th = {sort, setSort};
 
   return <>
-    <div className="toolbar spread">
+    <div className="rk-chans" role="tablist" aria-label="Channel">{own.map(o => { const n = rk.categories.filter(c => c.channel === o.id).length;
+      return <button key={o.id} role="tab" className="rk-chan" aria-pressed={o.id === chan?.id} onClick={() => { setChan(o.id); setCatId(null); setEditing(null); }}>
+        <Avatar channel={o} size={36}/><span><b>{o.name}</b><small>{n ? n + (n === 1 ? ' category' : ' categories') : 'No categories yet'}</small></span></button>; })}</div>
+    <div className="toolbar spread rk-cats">
       <div className="row">
-        <div className="seg" role="tablist" aria-label="Category">{rk.categories.map(c => <button key={c.id} role="tab" aria-pressed={c.id === cat?.id} onClick={() => setCatId(c.id)}>{c.important ? <span className="imp-star" aria-label="Important">★</span> : null}{c.name}</button>)}</div>
-        <button className="link-btn" onClick={() => setEditing('category')}>+ Category</button>
+        {cats.length > 0 && <div className="seg" role="tablist" aria-label="Category">{cats.map(c => <button key={c.id} role="tab" aria-pressed={c.id === cat?.id} onClick={() => setCatId(c.id)}>{c.important ? <span className="imp-star" aria-label="Important">★</span> : null}{c.name}</button>)}</div>}
+        <button className="rk-addcat" onClick={() => setEditing('category')}>+ Category</button>
       </div>
       <div className="row"><span className="muted small">{lastCheck ? 'Checked '+ago(lastCheck) : 'Not checked'}</span>
         {cat && <button className="btn" disabled={!!busy || !!man || !!w.pausedUntil} onClick={() => check({category:cat.id})}>{man && man.category === cat.id ? <><span className="spinner"/>Checking…</> : 'Check '+cat.name+' now'}</button>}</div>
     </div>
     {editing === 'category' && <form className="editor" onSubmit={addCategory}><div className="fields">
       <label>Category<input name="name" placeholder="e.g. Smartphone" required maxLength="80"/></label>
-      <label>Track channel<select name="channel">{own.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select></label>
+      <label>Track channel<input value={chan?.name ?? ''} readOnly disabled/></label>
     </div><div className="row end"><button type="button" className="btn" onClick={() => setEditing(null)}>Cancel</button><button className="btn primary">Add category</button></div></form>}
 
     <div className={'worker-strip'+(w.pausedUntil ? ' paused' : '')}>
@@ -171,12 +180,12 @@ function Rankings({data, own, call, setNotice, undo}) {
     {cat ? <section className="card cat-card" key={cat.id}>
       <div className="card-head">
         <div><h2>{cat.name} · {cat.channel_name}</h2>
-          <span className="muted">{count('strong')} of {subs.length} on target · {queries.length ? Math.round(queries.filter(q => q.rank != null && q.rank <= rk.top).length/queries.length*100) : 0}% of searches in top {rk.top}{count('missing') ? ` · ${count('missing')} not ranking` : ''}</span></div>
+          <span className="muted">{subs.filter(x => { const d = x.queries.filter(q => q.ts && !q.error); return d.length && d.filter(q => q.rank === 1).length / d.length >= 0.7; }).length} of {subs.length} listed on top · {queries.length ? Math.round(queries.filter(q => q.rank != null && q.rank <= rk.top).length/queries.length*100) : 0}% of searches in top {rk.top}{count('missing') ? ` · ${count('missing')} not ranking` : ''}</span></div>
         <button className={'btn imp-btn'+(cat.important ? ' on' : '')} disabled={busy === 'imp'} aria-pressed={!!cat.important}
           title={cat.important ? 'Checked every '+w.importantHours+'h. Click to return to every '+w.normalHours+'h.' : 'Check this category every '+w.importantHours+'h instead of every '+w.normalHours+'h'}
           onClick={() => run('imp', () => call('/api/rankings/categories/'+cat.id+'/important', {method:'POST', body:JSON.stringify({important:!cat.important})}))}>
           {busy === 'imp' ? <span className="spinner"/> : cat.important ? '★' : '☆'}{cat.important ? 'Important · every '+w.importantHours+'h' : 'Mark as Important'}</button>
-        <div className="legend"><span className="rk rk-top">1–2</span><span className="rk rk-mid">3–5</span><span className="rk rk-low">6+</span><span className="rk rk-none">–</span><span className="muted">not in top 20</span></div>
+        <div className="legend"><span className="rk rk-top">1</span><span className="rk rk-mid">2–3</span><span className="rk rk-low">4+</span><span className="rk rk-none">–</span><span className="muted">not in top 20</span></div>
       </div>
       {editSub && <SubEditor sub={editSub} category={cat.id} onSave={saveSub} onCancel={() => setEditing(null)}/>}
       <div className="table-wrap"><table className="rank-table">
@@ -194,7 +203,7 @@ function Rankings({data, own, call, setNotice, undo}) {
       {editing === 'new' && <SubEditor category={cat.id} onSave={saveSub} onCancel={() => setEditing(null)}/>}
       <div className="row card-foot"><button className="link-btn" onClick={() => setEditing('new')}>+ Add budget</button>
         <button className="link-btn danger" onClick={() => { setCatId(null); undo('cat:'+cat.id, 'Deleted the '+cat.name+' category', () => call('/api/rankings/categories/'+cat.id, {method:'DELETE'})); }}>Delete category</button></div>
-    </section> : <section className="card"><div className="spark-empty">No categories yet. Add one to start tracking search rankings.</div></section>}
+    </section> : <section className="card"><div className="spark-empty">No categories for {chan?.name} yet. Press “+ Category for {chan?.name}” to start tracking its search rankings.</div></section>}
     <RivalBoard rivals={rk.watchdog.rivals}/>
     <WatchdogPanel wd={rk.watchdog} rk={rk} cat={cat} call={call} busy={!!man || !!w.pausedUntil}/>
   </>;

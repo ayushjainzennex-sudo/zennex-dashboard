@@ -1462,3 +1462,48 @@ main:has(.tlayout){max-width:1760px}
 .rs-profile{display:grid;gap:10px}.rs-profile label{display:grid;gap:4px;font-size:13px;color:var(--muted)}
 .rs-profile textarea{font:inherit;color:var(--text);background:var(--panel-2);border:1px solid var(--border);border-radius:10px;padding:8px 12px;resize:vertical}
 /* topic-research AI picks v2: end */
+
+/* Trends chart summary */
+.gt-sum{display:flex;flex-wrap:wrap;gap:6px 18px;align-items:baseline;font-size:13px;color:var(--muted);margin:0 0 8px}
+.gt-sum b{color:var(--text);font-size:15px}.gt-sum b.up-text{color:var(--up,#22a06b)}.gt-sum b.down-text{color:var(--down,#e5484d)}
+.gt-smooth{margin-left:auto;display:inline-flex;gap:6px;align-items:center;cursor:pointer}
+
+/* topic-research pick focus */
+.rs-focus{margin-top:10px;flex-wrap:wrap}
+
+/* topic-research saved AI output */
+.rs-sai{display:inline-flex;gap:6px;margin-top:4px}
+.rs-sopen{grid-column:1/-1;margin-top:2px;padding:12px 14px;border-radius:12px;background:var(--panel-2)}
+.rs-bfoot span{margin-left:6px}
+
+/* rank colours: #1 glowing green, #2–3 yellow, #4+ glowing red */
+.rk.rk-top{background:#22e07a2e;color:#3dff95;box-shadow:0 0 0 1px #3dff9566,0 0 10px #3dff9580;text-shadow:0 0 6px #3dff95aa}
+.rk.rk-mid{background:#ffd23d26;color:#ffd23d;box-shadow:0 0 0 1px #ffd23d66,0 0 10px #ffd23d80;text-shadow:0 0 6px #ffd23daa}
+.rk.rk-low{background:#ff3b3b26;color:#ff5a5a;box-shadow:0 0 0 1px #ff5a5a66,0 0 10px #ff3b3b80;text-shadow:0 0 6px #ff5a5a99}
+.rk{display:inline-grid;place-items:center;text-align:center;line-height:1}   /* later .rk{display:inline-block} broke centring */
+/* rank colours, light theme: stronger fills and borders so they read on white */
+@media (prefers-color-scheme:light){
+:root:not([data-theme=dark]) .rk.rk-top{background:#16a34a2e;color:#0b7a37;box-shadow:0 0 0 1.5px #16a34a,0 0 8px #16a34a66;text-shadow:none}
+:root:not([data-theme=dark]) .rk.rk-mid{background:#f5b3003a;color:#8a5a00;box-shadow:0 0 0 1.5px #e0a100,0 0 8px #f5b30066;text-shadow:none}
+:root:not([data-theme=dark]) .rk.rk-low{background:#dc26262a;color:#b91c1c;box-shadow:0 0 0 1.5px #dc2626,0 0 8px #dc262666;text-shadow:none}}
+:root[data-theme=light] .rk.rk-top{background:#16a34a2e;color:#0b7a37;box-shadow:0 0 0 1.5px #16a34a,0 0 8px #16a34a66;text-shadow:none}
+:root[data-theme=light] .rk.rk-mid{background:#f5b3003a;color:#8a5a00;box-shadow:0 0 0 1.5px #e0a100,0 0 8px #f5b30066;text-shadow:none}
+:root[data-theme=light] .rk.rk-low{background:#dc26262a;color:#b91c1c;box-shadow:0 0 0 1.5px #dc2626,0 0 8px #dc262666;text-shadow:none}
+.status.ok i{background:#4c8dff}   /* "In top 2" without being #1 on 70% */
+
+/* rankings: channel picker as cards, roomier category row */
+.rk-chans{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px;margin:4px 0 20px}
+.rk-chan{display:flex;align-items:center;gap:12px;padding:12px 16px;border-radius:var(--radius);background:var(--panel);border:1px solid var(--border);color:var(--text);text-align:left;cursor:pointer;transition:border-color .15s,background .15s,transform .15s}
+.rk-chan:hover{transform:translateY(-1px);border-color:color-mix(in srgb,var(--accent) 35%,var(--border))}
+.rk-chan[aria-pressed=true]{border-color:var(--accent);background:color-mix(in srgb,var(--accent) 9%,var(--panel));box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 16%,transparent)}
+.rk-chan>span{display:grid;gap:2px;min-width:0}.rk-chan b{font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.rk-chan small{color:var(--muted);font-size:12px}
+.rk-chan .avatar,.rk-chan img{flex:none}
+.rk-cats{margin-bottom:16px;gap:12px}.rk-cats .row{gap:12px;flex-wrap:wrap}
+.rk-addcat{padding:8px 14px;border-radius:999px;border:1px dashed var(--border);background:transparent;color:var(--muted);font:inherit;font-size:13px;cursor:pointer}
+.rk-addcat:hover{color:var(--accent);border-color:var(--accent)}
+.rk-cats+.editor,.rk-cats~.worker-strip{margin-top:4px}
+
+/* topic research: channel cards (same as Rankings) */
+.rs-allav{flex:none;width:36px;height:36px;border-radius:50%;display:grid;place-items:center;font-size:16px;color:var(--accent);background:color-mix(in srgb,var(--accent) 14%,var(--panel-2))}
+.rk-chan:disabled{opacity:.6;cursor:default;transform:none}
+.rs-chans{grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}.rs-chans .rk-chan{padding:10px 12px;gap:10px}

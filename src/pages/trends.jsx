@@ -84,16 +84,36 @@ function Explore() {
   </>;
 }
 
-function Chart({d}) {
+// Moving average so weekly noise doesn't hide the trend; the raw line stays faintly behind it.
+const smooth = (vals, w) => w < 2 ? vals : vals.map((_, i) => { const a = Math.max(0, i - (w >> 1)), l = vals.slice(a, Math.min(vals.length, a + w)); return l.reduce((x, y) => x + y, 0) / l.length; });
+export function Chart({d}) {
   const [hover, setHover] = useState(null);
+  const [smoothOn, setSmoothOn] = usePref('trendsSmooth', true);
   const svg = useRef(null);
-  const pts = d.points, n = pts.length;
-  if (!n || pts.every(p => p.values.every(v => !v))) return <NoData/>;
+  if (!d.points.length || d.points.every(p => p.values.every(v => !v))) return <NoData/>;
+  // drop the empty stretch before the search existed (all zeros at the start)
+  const first = Math.max(0, d.points.findIndex(p => p.values.some(v => v > 0)) - 1);
+  const pts = d.points.slice(first), n = pts.length, cut = first > 0 ? d.points[first].t : null;
   const W = 900, H = 280, L = 34, R = 10, T = 12, B = 30;
   const x = i => L + i * (W - L - R) / Math.max(1, n - 1), y = v => T + (100 - v) * (H - T - B) / 100;
-  const long = pts.at(-1).t - pts[0].t > 3 * 864e5;
-  const label = (t, full) => new Date(t).toLocaleString('en-IN', long ? {day: 'numeric', month: 'short', ...(full ? {year: 'numeric'} : {})} : {...(full ? {day: 'numeric', month: 'short'} : {}), hour: 'numeric', minute: '2-digit'});
-  const step = Math.max(1, Math.round(n / 5));
+  const span = pts.at(-1).t - pts[0].t, DAYMS = 864e5;
+  const fmt = span > 400 * DAYMS ? {month: 'short', year: 'numeric'} : span > 3 * DAYMS ? {day: 'numeric', month: 'short'} : {hour: 'numeric', minute: '2-digit'};
+  const label = (t, full) => new Date(t).toLocaleString('en-IN', full ? (span > 3 * DAYMS ? {day: 'numeric', month: 'short', year: 'numeric'} : {day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit'}) : fmt);
+  // ticks: at each new year for long ranges, else evenly spaced
+  let ticks;
+  if (span > 2 * 365 * DAYMS) { ticks = pts.map((p, i) => i && new Date(p.t).getFullYear() !== new Date(pts[i - 1].t).getFullYear() ? i : -1).filter(i => i >= 0); }
+  else { const step = Math.max(1, Math.round(n / 6)); ticks = pts.map((_, i) => i).filter(i => i % step === 0); }
+  const tickLabel = t => span > 2 * 365 * DAYMS ? String(new Date(t).getFullYear()) : label(t);
+  const w = !smoothOn ? 1 : n > 150 ? 6 : n > 60 ? 4 : n > 20 ? 3 : 1;
+  const series = d.keywords.map((_, k) => { const raw = pts.map(p => p.values[k]); return {raw, sm: smooth(raw, w)}; });
+  const path = vals => vals.map((v, i) => (i ? 'L' : 'M') + x(i).toFixed(1) + ' ' + y(v).toFixed(1)).join(' ');
+  // summary for the first term: where it is now, its peak, and change vs a year ago
+  // "Now": skip Google's unfinished last point(s) (often 0) and average the last few complete ones
+  let lastFull = n - 1; while (lastFull > 0 && pts[lastFull].partial) lastFull--;
+  const recentN = Math.max(3, Math.round(n / 20)), recent = series[0].raw.slice(Math.max(0, lastFull - recentN + 1), lastFull + 1);
+  const s0 = series[0].sm, now = recent.reduce((a, v) => a + v, 0) / recent.length, pk = s0.indexOf(Math.max(...s0));
+  const yearAgo = span > 380 * DAYMS ? pts.findIndex(p => p.t >= pts.at(-1).t - 365 * DAYMS) : -1;
+  const yoy = yearAgo > 0 && s0[yearAgo] ? Math.round((now - s0[yearAgo]) / s0[yearAgo] * 100) : null;
   const move = e => { const r = svg.current.getBoundingClientRect(); const vx = (e.clientX - r.left) / r.width * W; setHover(Math.max(0, Math.min(n - 1, Math.round((vx - L) / (W - L - R) * (n - 1))))); };
   const p = hover != null ? pts[hover] : null;
   return <div className="gt-iot">
@@ -101,16 +121,28 @@ function Chart({d}) {
       {d.averages.map((a, k) => <div key={k} title={d.keywords[k] + ': ' + Math.round(a)}><i style={{height: Math.max(2, a / 100 * 210), background: COLORS[k]}}/><span>{Math.round(a)}</span></div>)}
     </div>}
     <div className="gt-chart">
+      <div className="gt-sum">
+        <span>Now <b>{Math.round(now)}</b><span className="muted">/100</span></span>
+        <span>Peak <b>{label(pts[pk].t, true).replace(/^\d+ /, span > 60 * DAYMS ? '' : '$&')}</b></span>
+        {yoy != null && <span>vs a year ago <b className={yoy >= 0 ? 'up-text' : 'down-text'}>{yoy >= 0 ? '+' : ''}{yoy}%</b></span>}
+        {cut && <span className="muted small">No searches before {label(cut, true)}</span>}
+        <label className="gt-smooth"><input type="checkbox" checked={smoothOn} onChange={e => setSmoothOn(e.target.checked)}/> Smooth</label>
+      </div>
       <svg ref={svg} viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" onMouseMove={move} onMouseLeave={() => setHover(null)} role="img" aria-label="Interest over time">
+        <defs>{d.keywords.map((_, k) => <linearGradient key={k} id={'gtfill' + k} x1="0" x2="0" y1="0" y2="1"><stop offset="0" stopColor={COLORS[k]} stopOpacity=".28"/><stop offset="1" stopColor={COLORS[k]} stopOpacity="0"/></linearGradient>)}</defs>
         {[0, 25, 50, 75, 100].map(v => <g key={v}><line x1={L} x2={W - R} y1={y(v)} y2={y(v)} stroke="var(--border)" strokeDasharray={v ? '2 3' : ''}/><text x={L - 8} y={y(v) + 4} fontSize="11" textAnchor="end" fill="var(--muted)">{v}</text></g>)}
-        {pts.map((p, i) => i % step ? null : <text key={i} x={x(i)} y={H - 8} fontSize="11" textAnchor="middle" fill="var(--muted)">{label(p.t)}</text>)}
-        {d.keywords.map((_, k) => <path key={k} d={pts.map((p, i) => (i ? 'L' : 'M') + x(i).toFixed(1) + ' ' + y(p.values[k]).toFixed(1)).join(' ')} fill="none" stroke={COLORS[k]} strokeWidth="2" strokeLinejoin="round" vectorEffect="non-scaling-stroke"/>)}
+        {ticks.map(i => <g key={i}>{span > 2 * 365 * DAYMS && <line x1={x(i)} x2={x(i)} y1={T} y2={H - B} stroke="var(--border)" strokeDasharray="2 3"/>}
+          <text x={x(i)} y={H - 8} fontSize="11" textAnchor={span > 2 * 365 * DAYMS ? 'start' : 'middle'} dx={span > 2 * 365 * DAYMS ? 4 : 0} fill="var(--muted)">{tickLabel(pts[i].t)}</text></g>)}
+        {d.keywords.length === 1 && <path d={path(series[0].sm) + ` L${x(n - 1)} ${y(0)} L${x(0)} ${y(0)} Z`} fill="url(#gtfill0)"/>}
+        {w > 1 && series.map((sr, k) => <path key={'r' + k} d={path(sr.raw)} fill="none" stroke={COLORS[k]} strokeOpacity=".22" strokeWidth="1" vectorEffect="non-scaling-stroke"/>)}
+        {series.map((sr, k) => <path key={k} d={path(sr.sm)} fill="none" stroke={COLORS[k]} strokeWidth="2.5" strokeLinejoin="round" vectorEffect="non-scaling-stroke"/>)}
+        {d.keywords.length === 1 && <circle cx={x(pk)} cy={y(s0[pk])} r="4" fill={COLORS[0]} stroke="var(--panel)" strokeWidth="2"/>}
         {p && <><line x1={x(hover)} x2={x(hover)} y1={T} y2={H - B} stroke="var(--muted)" vectorEffect="non-scaling-stroke"/>
-          {d.keywords.map((_, k) => <circle key={k} cx={x(hover)} cy={y(p.values[k])} r="4" fill={COLORS[k]} stroke="var(--panel)" strokeWidth="2"/>)}</>}
+          {series.map((sr, k) => <circle key={k} cx={x(hover)} cy={y(sr.sm[hover])} r="4" fill={COLORS[k]} stroke="var(--panel)" strokeWidth="2"/>)}</>}
       </svg>
       {p && <div className="gt-tip" style={{left: `min(calc(${x(hover) / W * 100}% + 12px), calc(100% - 200px))`}}>
-        <b>{label(p.t, true)}{p.partial ? ' (partial)' : ''}</b>
-        {d.keywords.map((kw, k) => <div key={k}><span className="gt-dot" style={{background: COLORS[k]}}/>{kw}<b>{p.values[k]}</b></div>)}
+        <b>{span > 3 * DAYMS && n > 100 ? 'Week of ' : ''}{label(p.t, true)}{p.partial ? ' (partial)' : ''}</b>
+        {d.keywords.map((kw, k) => <div key={k}><span className="gt-dot" style={{background: COLORS[k]}}/>{kw}<b>{p.values[k]}</b>{w > 1 && <span className="muted small"> · trend {Math.round(series[k].sm[hover])}</span>}</div>)}
       </div>}
     </div>
   </div>;

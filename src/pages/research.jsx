@@ -4,7 +4,8 @@
 // Part of the topic-research feature: see RESEARCH.md for how to remove it.
 import React, {useEffect, useMemo, useState} from 'react';
 import {createPortal} from 'react-dom';
-import {api, fmt, toast, usePref} from '../shared.jsx';
+import {Avatar, api, fmt, toast, usePref} from '../shared.jsx';
+import {Chart as TrendChart} from './trends.jsx';
 import {REMOTE, pass} from '../remote.js';
 
 async function get(kind, params) {
@@ -56,12 +57,12 @@ export function ResearchPage({own = [], onOpen}) {
       <button key={k} aria-pressed={tab === k} onClick={() => set({tab: k})}>{l}</button>)}
   </div></div>;
   const card = q => <Scorecard q={q} geo={GEO} onPick={q => set({pick: q, tab: 'find'})} saved={savedOf(q, GEO)}
-    onSave={c => save({q, geo: GEO, total: c.total, verdict: c.verdict})} onUnsave={() => unsave(q, GEO)}
+    onSave={(c, brief) => save({q, geo: GEO, total: c.total, verdict: c.verdict, ...(brief ? {brief} : {})})} onUnsave={() => unsave(q, GEO)}
     inCompare={cmp.includes(q)} onCompare={() => toggleCompare(q)}/>;
   if (tab === 'saved') return <div className="rs">{tabs}<Saved list={saved} err={savedErr} own={own} onOpenPlanner={() => onOpen?.('planner')}
     onOpen={x => set({tab: 'find', pick: x.q})} onSave={save} onRemove={x => unsave(x.q, x.geo)} onCompare={toggleCompare} cmp={cmp}/></div>;
   if (tab === 'picks') return <div className="rs">{tabs}<Picks onScore={p => set({tab: 'find', pick: p.topic})} onExplore={p => { setSeed(p.topic); set({tab: 'find', seed: p.topic, pick: p.topic, recent: [p.topic, ...s.recent.filter(r => r !== p.topic)].slice(0, 8)}); }}
-    isSaved={p => !!savedOf(p.topic, GEO)} onSave={p => save({q: p.topic, geo: GEO, notes: p.title + ' — ' + p.why})}/></div>;
+    isSaved={p => !!savedOf(p.topic, GEO)} onSave={p => save({q: p.topic, geo: GEO, notes: p.title, pick: p})} channels={own}/></div>;
   if (tab === 'compare') return <div className="rs">{tabs}<Compare topics={cmp} geo={GEO} onRemove={toggleCompare} onOpen={q => set({tab: 'find', pick: q})}/></div>;
   return <div className="rs">
     {tabs}
@@ -174,7 +175,7 @@ function Scorecard({q, geo, onPick, saved, onSave, onUnsave, inCompare, onCompar
       <div className="gt-head"><h2>What ranks now</h2><span className="muted small">top {d.results.length} on YouTube</span></div>
       <div className="rs-vids">{d.results.slice(0, 10).map(v => <Video key={v.id} v={v}/>)}</div>
     </section>
-    <Brief q={d.q}/>
+    <Brief q={d.q} saved={saved} onSaveBrief={b => onSave(d, b)}/>
     {showAngles && <Angles q={d.q} geo={geo} onPick={onPick}/>}
     {d.coverage && <section className="card">
       <div className="gt-head"><h2>Already covered</h2><span className="muted small">your channels and competitors</span></div>
@@ -219,7 +220,7 @@ function Angles({q, geo, onPick}) {
 // ---------- saved ideas (step 2) ----------
 const STATUSES = ['Idea', 'Researching', 'Approved', 'Dropped'];
 function Saved({list, err, own, onOpen, onSave, onRemove, onOpenPlanner, onCompare, cmp}) {
-  const [show, setShow] = useState('active'), [plan, setPlan] = useState(null);
+  const [show, setShow] = useState('active'), [plan, setPlan] = useState(null), [open, setOpen] = useState(null);
   if (err) return <section className="card"><p className="down-text">Saved ideas need one of your computers (a node): {err}</p></section>;
   if (!list) return <section className="card">{Array.from({length: 5}, (_, i) => <div key={i} className="sk" style={{height: 44, borderRadius: 8, margin: '8px 0'}}/>)}</section>;
   const rows = list.filter(x => show === 'all' || (show === 'active' ? x.status !== 'Dropped' : x.status === show));
@@ -235,6 +236,10 @@ function Saved({list, err, own, onOpen, onSave, onRemove, onOpenPlanner, onCompa
           <div className="rs-smain">
             <button className="gt-link rs-sq" onClick={() => onOpen(x)}>{x.q}</button>
             <span className="muted small">{x.verdict} · {x.geo || 'Worldwide'} · saved {new Date(x.savedAt).toLocaleDateString('en-IN', {day: 'numeric', month: 'short'})}{x.plan ? ' · in Planner' : ''}</span>
+            {(x.brief || x.pick) && <span className="rs-sai">
+              {x.pick && <button className={'btn sm' + (open === x.q + '|pick' ? ' on' : '')} onClick={() => setOpen(open === x.q + '|pick' ? null : x.q + '|pick')}>✦ AI pick</button>}
+              {x.brief && <button className={'btn sm' + (open === x.q + '|brief' ? ' on' : '')} onClick={() => setOpen(open === x.q + '|brief' ? null : x.q + '|brief')}>✦ AI brief</button>}
+            </span>}
             <input className="rs-notes" defaultValue={x.notes} placeholder="Notes: angle, references, why it’s good…" aria-label={'Notes for ' + x.q}
               onBlur={e => e.target.value !== (x.notes ?? '') && onSave({q: x.q, geo: x.geo, notes: e.target.value})}/>
           </div>
@@ -244,6 +249,9 @@ function Saved({list, err, own, onOpen, onSave, onRemove, onOpenPlanner, onCompa
             <button className="btn sm primary" onClick={() => setPlan(x)}>{x.plan ? 'Plan again' : 'Send to Planner'}</button>
             <button className="btn sm" aria-label={'Remove ' + x.q} onClick={() => onRemove(x)}>Remove</button>
           </div>
+          {open === x.q + '|pick' && x.pick && <div className="rs-sopen"><PickView p={x.pick}/></div>}
+          {open === x.q + '|brief' && x.brief && <div className="rs-sopen rs-brief"><div className="rs-b"><BriefView b={x.brief}/>
+            <div className="rs-bfoot muted small">{x.brief.model} · {new Date(x.brief.fetched).toLocaleString('en-IN', {day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit'})}</div></div></div>}
         </div>;
       })}</section>}
     {plan && <PlanDialog x={plan} own={own} onClose={() => setPlan(null)} onDone={id => { onSave({q: plan.q, geo: plan.geo, status: 'Approved', plan: id}); setPlan(null); toast('Added to the Planner'); onOpenPlanner?.(); }}/>}
@@ -255,7 +263,10 @@ function PlanDialog({x, own, onClose, onDone}) {
   const send = async () => {
     setBusy(true);
     const id = 'rs-' + Math.random().toString(36).slice(2, 12);
-    const notes = `From Topic research: score ${x.total ?? '—'} (${x.verdict ?? 'not scored'}) for “${x.q}”${x.geo ? ' in ' + x.geo : ''}.` + (x.notes ? '\n' + x.notes : '') +
+    const ai = [x.pick && `AI pick: ${x.pick.why}${x.pick.newBecause ? ' New because: ' + x.pick.newBecause : ''}`,
+      x.brief?.best_angle && 'Best angle: ' + x.brief.best_angle, x.brief?.titles?.length && 'Titles: ' + x.brief.titles.map(t => t.title).join(' | '),
+      x.brief?.hook && 'Hook: ' + x.brief.hook, x.brief?.outline?.length && 'Outline: ' + x.brief.outline.join(' → ')].filter(Boolean).join(String.fromCharCode(10));
+    const notes = (ai ? ai + String.fromCharCode(10) : '') + `From Topic research: score ${x.total ?? '—'} (${x.verdict ?? 'not scored'}) for “${x.q}”${x.geo ? ' in ' + x.geo : ''}.` + (x.notes ? '\n' + x.notes : '') +
       '\nYouTube search: https://www.youtube.com/results?search_query=' + encodeURIComponent(x.q);
     try { await api('/api/plans', {method: 'POST', body: JSON.stringify({id, title, channel, format, status: 'Idea', notes})}); onDone(id); }
     catch (e) { toast(e.message); setBusy(false); }
@@ -295,11 +306,8 @@ function Compare({topics, geo, onRemove, onOpen}) {
     {chips}
     <section className="card">
       <div className="gt-head"><h2>Search interest on YouTube, 12 months</h2><span className="muted small">shared scale: 100 = busiest week of any topic</span></div>
-      {n > 1 ? <svg className="rs-cchart" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none">
-        {[0, 50, 100].map(v => <line key={v} x1={P} x2={W - P} y1={y(v)} y2={y(v)} stroke="var(--border)" strokeDasharray="2 3"/>)}
-        {topics.map((_, k) => <path key={k} d={pts.map((p, i) => (i ? 'L' : 'M') + x(i).toFixed(1) + ' ' + y(p.values[k] ?? 0).toFixed(1)).join(' ')} fill="none" stroke={CC[k]} strokeWidth="2" vectorEffect="non-scaling-stroke"/>)}
-      </svg> : <p className="muted">{d.trendsError ?? 'Not enough Google Trends data.'}</p>}
-      {d.trends && <div className="rs-avgs">{topics.map((t, k) => <span key={t}><i style={{background: CC[k]}}/>{t}<b>{Math.round(d.trends.averages[k] ?? 0)}</b></span>)}</div>}
+      {n > 1 ? <TrendChart d={{...d.trends, keywords: topics}}/> : <p className="muted">{d.trendsError ?? 'Not enough Google Trends data.'}</p>}
+      {d.trends && <div className="rs-avgs">{topics.map((t, k) => <span key={t}><i style={{background: CC[k]}}/>{t}<span className="muted small">avg</span><b>{Math.round(d.trends.averages[k] ?? 0)}</b></span>)}</div>}
     </section>
     <section className="card rs-ctable">
       <table className="cs-table"><thead><tr><th>Topic</th><th>Score</th>{PARTS.map(([k, l]) => <th key={k}>{l}</th>)}<th></th></tr></thead>
@@ -322,15 +330,17 @@ function Compare({topics, geo, onRemove, onOpen}) {
 // ---------- AI brief (Gemini; nodes only) ----------
 const LANGS = [['english', 'English'], ['hinglish', 'Hinglish'], ['hindi', 'Hindi']];
 const copy = t => navigator.clipboard?.writeText(t).then(() => toast('Copied'), () => {});
-function Brief({q}) {
+function Brief({q, saved, onSaveBrief}) {
   const [lang, setLang] = usePref('researchLang', 'hinglish');
   const [state, setState] = useState({}), [secs, setSecs] = useState(0);
-  const b = state.q === q && state.lang === lang ? state.data : null, busy = state.busy && state.q === q;
+  // a brief kept with the saved idea shows straight away (no new Gemini call)
+  const b = state.q === q && state.lang === lang && state.data ? state.data : !(state.busy && state.q === q) && saved?.brief?.q === q ? saved.brief : null, busy = state.busy && state.q === q;
+  const kept = !!b && saved?.brief?.fetched === b.fetched;
   useEffect(() => { if (!busy) return; const t0 = Date.now(), t = setInterval(() => setSecs(Math.round((Date.now() - t0) / 1000)), 1000); return () => clearInterval(t); }, [busy]);
   const run = fresh => {
     setState({q, lang, busy: true}); setSecs(0);
     api('/api/research/brief', {method: 'POST', body: JSON.stringify({q, lang, fresh})})
-      .then(data => setState({q, lang, data}), e => setState({q, lang, error: e.message}));
+      .then(data => { setState({q, lang, data}); if (saved) onSaveBrief?.(data); }, e => setState({q, lang, error: e.message}));   // idea already saved: keep the new brief with it
   };
   const err = state.q === q && state.lang === lang ? state.error : null;
   return <section className="card rs-brief">
@@ -343,6 +353,15 @@ function Brief({q}) {
         <p className="muted small">Titles, the best angle, what current videos miss, a hook, an outline, Shorts and thumbnail text, based on the score, top videos and searches above.</p>
         <button className="btn primary sm" onClick={() => run(false)}>Write AI brief</button>
       </> : <div className="rs-b">
+        <BriefView b={b}/>
+        <div className="rs-bfoot muted small">{b.model} · {new Date(b.fetched).toLocaleString('en-IN', {day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit'})} · AI can be wrong; check facts before using
+          {kept ? <span>★ Saved with the idea</span> : <button className="btn sm" onClick={() => onSaveBrief?.(b)}>{saved ? '☆ Keep this brief' : '☆ Save idea with brief'}</button>}
+          <button className="btn sm" onClick={() => run(true)}>Write again</button></div>
+      </div>}
+  </section>;
+}
+function BriefView({b}) {
+  return <>
         <p>{b.summary}</p>
         {b.best_angle && <div className="rs-bbox"><span className="rs-sub">Best angle</span>{b.best_angle}</div>}
         {b.gap && <div className="rs-bbox"><span className="rs-sub">What current videos miss</span>{b.gap}</div>}
@@ -354,45 +373,63 @@ function Brief({q}) {
         {b.shorts?.length > 0 && <><div className="rs-sub">Shorts ideas</div><ul className="rs-bl">{b.shorts.map((x, i) => <li key={i}>{x}</li>)}</ul></>}
         {b.thumbnail_text?.length > 0 && <><div className="rs-sub">Thumbnail text</div><div className="rs-chips">{b.thumbnail_text.map(x => <button key={x} className="gt-cat rs-tt" onClick={() => copy(x)} title="Copy">{x}</button>)}</div></>}
         {b.risks?.length > 0 && <><div className="rs-sub">Risks</div><ul className="rs-bl muted">{b.risks.map((x, i) => <li key={i}>{x}</li>)}</ul></>}
-        <div className="rs-bfoot muted small">{b.model} · {new Date(b.fetched).toLocaleString('en-IN', {day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit'})} · AI can be wrong; check facts before using
-          <button className="btn sm" onClick={() => run(true)}>Write again</button></div>
-      </div>}
-  </section>;
+  </>;
+}
+function PickView({p}) {
+  return <div className="rs-b">
+    {p.title && <h3 style={{margin: 0}}>{p.title}</h3>}
+    <p>{p.why}</p>
+    {p.newBecause && <p className="small"><b>New because:</b> {p.newBecause}</p>}
+    {p.evidence?.length > 0 && <ul className="rs-ev">{p.evidence.map((e, j) => <li key={j}>{e.video ? <a href={'https://www.youtube.com/watch?v=' + e.video} target="_blank" rel="noreferrer">{e.text}</a> : e.text}</li>)}</ul>}
+    <span className="muted small">{[p.kind && KIND_LABEL[p.kind], p.format, p.urgency].filter(Boolean).join(' · ')}</span>
+  </div>;
 }
 
 // ---------- AI picks: topics suggested automatically, with reasons ----------
 const URGENCY = {now: ['Make now', 'down-text'], 'this week': ['This week', 'warn'], evergreen: ['Evergreen', 'muted']};
 const VOTES = [['up', '👍', 'More like this'], ['down', '👎', 'Not for us'], ['made', '✓ Made', 'We made this']];
-function Picks({onScore, onExplore, isSaved, onSave}) {
+const FOCUS = [['', 'Mix', 'A few of each kind'], ['fresh', '✦ New ideas', 'Concepts we have never covered, like “AI laptop vs normal laptop”'],
+  ['gap', 'Ranking gaps', 'Budgets where our search rankings are weak, missing or slipping'], ['news', 'News', 'Launches, sales and news happening now'],
+  ['trend', 'Trends', 'Searches climbing on Google Trends, or a seasonal peak coming up']];
+const KIND_LABEL = {fresh: '✦ New idea', gap: 'Ranking gap', news: 'News', trend: 'Trend'};
+function Picks({onScore, onExplore, isSaved, onSave, channels = []}) {
   const [channel, setChannel] = usePref('researchPicksFor', 'all');
+  const [focus, setFocus] = usePref('researchPicksFocus', '');
   const [d, setD] = useState(null), [err, setErr] = useState(null), [busy, setBusy] = useState(false), [secs, setSecs] = useState(0);
   const [showProfile, setShowProfile] = useState(false);
-  const load = () => api('/api/research/picks?channel=' + channel).then(x => { setD(x); return x; });
+  const load = () => api('/api/research/picks?channel=' + channel + (focus ? '&focus=' + focus : '')).then(x => { setD(x); return x; });
   const make = () => {
     setBusy(true); setErr(null); setSecs(0);
     const t0 = Date.now(), t = setInterval(() => setSecs(Math.round((Date.now() - t0) / 1000)), 1000);
-    api('/api/research/picks', {method: 'POST', body: JSON.stringify({channel})}).then(setD, e => setErr(e.message)).finally(() => { clearInterval(t); setBusy(false); });
+    api('/api/research/picks', {method: 'POST', body: JSON.stringify({channel, focus})}).then(setD, e => setErr(e.message)).finally(() => { clearInterval(t); setBusy(false); });
   };
   useEffect(() => {   // stored picks at once; new ones automatically when they're over a day old
     setD(null); setErr(null);
     load().then(x => { if (x.stale) make(); }, e => setErr(e.message));
-  }, [channel]);
+  }, [channel, focus]);
   useEffect(() => {   // while picks are being scored in the background, check every few seconds
     if (!d?.scoring) return;
     const t = setInterval(() => load().catch(() => {}), 6000);
     return () => clearInterval(t);
-  }, [d?.scoring, channel]);
+  }, [d?.scoring, channel, focus]);
   const vote = (p, v) => {
     const next = p.vote === v ? 'none' : v;
     setD(x => ({...x, picks: x.picks.map(q => q.topic === p.topic ? {...q, vote: next === 'none' ? null : next} : q)}));
-    api('/api/research/picks/vote', {method: 'POST', body: JSON.stringify({topic: p.topic, vote: next, channel})}).catch(e => toast(e.message));
+    api('/api/research/picks/vote', {method: 'POST', body: JSON.stringify({topic: p.topic, vote: next, channel, focus})}).catch(e => toast(e.message));
   };
   const own = d?.own ?? [];
   const u = d?.used;
   return <>
-    <div className="toolbar rs-phead">
-      <div className="seg sm" role="group" aria-label="Picks for">
-        {[['all', 'All channels'], ...own.map(c => [String(c.id), c.name])].map(([k, l]) => <button key={k} aria-pressed={channel === k} onClick={() => setChannel(k)}>{l}</button>)}
+    <div className="rk-chans rs-chans" role="tablist" aria-label="Picks for">
+      <button role="tab" className="rk-chan" aria-pressed={channel === 'all'} onClick={() => setChannel('all')} disabled={busy}>
+        <span className="rs-allav">✦</span><span><b>All channels</b><small>Whole network</small></span></button>
+      {own.map(c => { const full = channels.find(o => o.id === c.id) ?? c;
+        return <button key={c.id} role="tab" className="rk-chan" aria-pressed={channel === String(c.id)} onClick={() => setChannel(String(c.id))} disabled={busy}>
+          <Avatar channel={full} size={36}/><span><b>{c.name}</b><small>Picks for this channel</small></span></button>; })}
+    </div>
+    <div className="toolbar spread rk-cats rs-phead">
+      <div className="seg sm" role="group" aria-label="Kind of ideas">
+        {FOCUS.map(([k, l, t]) => <button key={k} title={t} aria-pressed={focus === k} onClick={() => setFocus(k)} disabled={busy}>{l}</button>)}
       </div>
       <div className="row">
         <button className={'btn sm' + (showProfile ? ' on' : '')} onClick={() => setShowProfile(!showProfile)}>Channel profile{u && !u.profile ? ' ·  add one' : ''}</button>
@@ -400,7 +437,7 @@ function Picks({onScore, onExplore, isSaved, onSave}) {
       </div>
     </div>
     {showProfile && <Profile onSaved={() => { setShowProfile(false); toast('Profile saved. Press “Suggest again” to use it.'); }}/>}
-    {d?.at && <p className="muted small rs-used">Suggested {new Date(d.at).toLocaleString('en-IN', {day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit'})} by {d.model} after weighing {d.candidates ?? '—'} candidates. Used: {u?.profile ? 'your profile, ' : ''}{u?.ranks ? u.ranks + ' of our tracked rankings, ' : ''}{u?.ranked ? u.ranked + ' live YouTube rankings, ' : ''}{u?.rivals} competitor hits, {u?.myHits} of your best videos, {u?.trends} India trends, {u?.plans} Planner entries, {u?.saved} saved ideas, {u?.votes} of your votes. Refreshes daily.
+    {d?.at && <p className="muted small rs-used">Suggested {new Date(d.at).toLocaleString('en-IN', {day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit'})} by {d.model} after weighing {d.candidates ?? '—'} candidates. Used: {u?.profile ? 'your profile, ' : ''}{u?.ranks ? u.ranks + ' of our tracked rankings, ' : ''}{u?.nicheTrends ? u.nicheTrends + ' niche Google Trends, ' : ''}{u?.ranked ? u.ranked + ' live YouTube rankings, ' : ''}{u?.rivals} competitor hits, {u?.myHits} of your best videos, {u?.trends} India trends, {u?.plans} Planner entries, {u?.saved} saved ideas, {u?.votes} of your votes. Refreshes daily.
       {d.scoring && <> · <span className="spinner sm"/> checking each pick against YouTube and Trends…</>}</p>}
     {err && <section className="card"><p className="down-text">{err}</p></section>}
     {!d?.picks?.length ? (busy || !d) && <div className="rs-picks">{Array.from({length: 4}, (_, i) => <section key={i} className="card"><div className="sk" style={{height: 150, borderRadius: 10}}/></section>)}</div>
@@ -408,7 +445,7 @@ function Picks({onScore, onExplore, isSaved, onSave}) {
         const [ul, uc] = URGENCY[p.urgency] ?? URGENCY.evergreen, sc = p.score;
         return <section key={p.topic + i} className={'card rs-pick' + (p.vote === 'down' ? ' voted-down' : '')}>
           <div className="rs-ptop">
-            <span className={'rs-urg ' + uc}>{ul}</span>{p.kind && <span className="rs-tag">{{fresh: '✦ New idea', gap: 'Ranking gap', news: 'News'}[p.kind]}</span>}<span className="rs-tag">{p.format}</span><span className={'rs-tag conf-' + p.confidence}>{p.confidence} confidence</span>
+            <span className={'rs-urg ' + uc}>{ul}</span>{p.kind && <span className="rs-tag">{KIND_LABEL[p.kind]}</span>}<span className="rs-tag">{p.format}</span><span className={'rs-tag conf-' + p.confidence}>{p.confidence} confidence</span>
             <span className="rs-pscore" title={sc?.parts?.map(x => x.label + ' ' + x.value).join(' · ') ?? ''}>{sc == null ? <span className="muted small"><span className="spinner sm"/> scoring</span>
               : sc.error ? <span className="muted small">no score</span>
               : <><b style={{color: tone(sc.total)}}>{sc.total}</b><span className="muted small">{sc.total < 40 ? 'weak on numbers' : sc.verdict}</span></>}</span>

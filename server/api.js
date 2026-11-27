@@ -543,8 +543,8 @@ const routes = compile([
   ['GET', '/api/research/angles', async ({query}) => { try { return {...await anglesWithDb(query.get('q'), query.get('geo') ?? 'IN'), via: 'node'}; } catch (err) { throw new HttpError(err.status ?? 502, err.message); } }],
   // POST so the browser allows the long wait (Gemini can take up to a minute)
   ['POST', '/api/research/brief', async ({body}) => { const b = await body(); try { return await researchBrief(b.q, 'IN', {lang: b.lang, fresh: !!b.fresh, coverage: onTopic(String(b.q ?? ''))}); } catch (err) { throw new HttpError(err.status ?? 502, err.message); } }],
-  ['GET', '/api/research/picks', ({query}) => readPicks(query.get('channel'))],
-  ['POST', '/api/research/picks', async ({body}) => { const b = await body().catch(() => ({})); try { return await makePicks(b.channel); } catch (err) { throw new HttpError(err.status ?? 502, err.message); } }],
+  ['GET', '/api/research/picks', ({query}) => readPicks(query.get('channel'), query.get('focus'))],
+  ['POST', '/api/research/picks', async ({body}) => { const b = await body().catch(() => ({})); try { return await makePicks(b.channel, b.focus); } catch (err) { throw new HttpError(err.status ?? 502, err.message); } }],
   ['POST', '/api/research/picks/vote', async ({body}) => { try { return await votePick(await body()); } catch (err) { throw new HttpError(err.status ?? 500, err.message); } }],
   ['GET', '/api/research/profile', () => readProfile()],
   ['POST', '/api/research/profile', async ({body}) => saveProfile(await body())],
