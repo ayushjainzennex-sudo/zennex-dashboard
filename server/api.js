@@ -14,6 +14,10 @@ import {backupNow, backupSettings, setMirror, startBackups, stopBackups} from '.
 import {dbHealth, runAction, saveDbSettings, startMaintenance, stopMaintenance} from './dbhealth.js';
 import {onBeforeRestart} from './updater.js';
 import {startSnapshots, stopSnapshots} from './snapshot.js';
+import {explore as trendsExplore, trending as trendsTrending} from './gtrends.js';
+import {ideasWithDb, scoreWithDb, anglesWithDb, savedIdeas, saveIdea, removeIdea, onTopic, readPicks, makePicks, readProfile, saveProfile, votePick} from './research-db.js';
+import {compare as researchCompare} from './research.js';
+import {brief as researchBrief} from './research-ai.js';   // topic-research AI brief (RESEARCH.md)   // topic-research (RESEARCH.md)
 import {thumbCreators, addThumbCreator, removeThumbCreator, thumbPrefs, saveThumbPrefs} from './thumbs.js';
 
 const HOUR = 3600e3, DAY = 24 * HOUR;
@@ -532,6 +536,24 @@ const routes = compile([
   ['POST', '/api/refresh', async () => { await runBatch('manual'); return dashboard(); }],
 
   // Competitors.
+  // topic-research (RESEARCH.md)
+  ['GET', '/api/research/ideas', async ({query}) => { try { return {...await ideasWithDb(query.get('q'), query.get('geo') ?? 'IN'), via: 'node'}; } catch (err) { throw new HttpError(err.status ?? 502, err.message); } }],
+  ['GET', '/api/research/score', async ({query}) => { try { return {...await scoreWithDb(query.get('q'), query.get('geo') ?? 'IN'), via: 'node'}; } catch (err) { throw new HttpError(err.status ?? 502, err.message); } }],
+  ['GET', '/api/research/compare', async ({query}) => { try { return {...await researchCompare(query.get('q'), query.get('geo') ?? 'IN'), via: 'node'}; } catch (err) { throw new HttpError(err.status ?? 502, err.message); } }],
+  ['GET', '/api/research/angles', async ({query}) => { try { return {...await anglesWithDb(query.get('q'), query.get('geo') ?? 'IN'), via: 'node'}; } catch (err) { throw new HttpError(err.status ?? 502, err.message); } }],
+  // POST so the browser allows the long wait (Gemini can take up to a minute)
+  ['POST', '/api/research/brief', async ({body}) => { const b = await body(); try { return await researchBrief(b.q, 'IN', {lang: b.lang, fresh: !!b.fresh, coverage: onTopic(String(b.q ?? ''))}); } catch (err) { throw new HttpError(err.status ?? 502, err.message); } }],
+  ['GET', '/api/research/picks', ({query}) => readPicks(query.get('channel'))],
+  ['POST', '/api/research/picks', async ({body}) => { const b = await body().catch(() => ({})); try { return await makePicks(b.channel); } catch (err) { throw new HttpError(err.status ?? 502, err.message); } }],
+  ['POST', '/api/research/picks/vote', async ({body}) => { try { return await votePick(await body()); } catch (err) { throw new HttpError(err.status ?? 500, err.message); } }],
+  ['GET', '/api/research/profile', () => readProfile()],
+  ['POST', '/api/research/profile', async ({body}) => saveProfile(await body())],
+  ['GET', '/api/research/saved', () => savedIdeas()],
+  ['POST', '/api/research/saved', async ({body}) => { try { return await saveIdea(await body()); } catch (err) { throw new HttpError(err.status ?? 500, err.message); } }],
+  ['POST', '/api/research/saved/remove', async ({body}) => { const b = await body(); return removeIdea(String(b.q ?? ''), String(b.geo ?? 'IN')); }],
+  // Google Trends (also answered by api/trends.js on Vercel when no node can).
+  ['GET', '/api/trends/explore', async ({query}) => { try { return {...await trendsExplore({q: query.get('q'), geo: query.get('geo') ?? 'IN', prop: query.get('prop'), time: query.get('time')}), via: 'node'}; } catch (err) { throw new HttpError(err.status ?? 502, err.message); } }],
+  ['GET', '/api/trends/trending', async ({query}) => { try { return {...await trendsTrending({geo: query.get('geo')}), via: 'node'}; } catch (err) { throw new HttpError(err.status ?? 502, err.message); } }],
   ['GET', '/api/thumbs/creators', () => thumbCreators()],
   ['GET', '/api/thumbs/prefs', () => thumbPrefs()],
   ['POST', '/api/thumbs/prefs', async ({body}) => saveThumbPrefs(await body())],   // POST: nodes before this version only allow GET/POST/DELETE across sites

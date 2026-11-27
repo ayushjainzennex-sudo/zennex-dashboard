@@ -28,6 +28,8 @@ const Rankings = page(() => import('./pages/rankings.jsx'), 'Rankings');
 const Report = page(() => import('./pages/report.jsx'), 'Report');
 const Settings = page(() => import('./pages/settings.jsx'), 'Settings');
 const Thumbnails = page(() => import('./pages/thumbnails.jsx'), 'Thumbnails');
+const TrendsPage = page(() => import('./pages/trends.jsx'), 'TrendsPage');
+const ResearchPage = page(() => import('./pages/research.jsx'), 'ResearchPage');   // topic-research (RESEARCH.md)
 
 const statuses = ['Idea','In production','Scheduled','Published'];
 
@@ -344,7 +346,7 @@ function App() {
   const owner = page.startsWith('competitors') ? own.find(o => 'competitors:'+o.id === page) ?? own[0] : null;
   const current = page.startsWith('ch:') ? [...own, ...competitors].find(c => 'ch:'+c.id === page) : null;
   const status = data?.status;
-  const titles = {nodes:'Nodes', database:'Database health', settings:'Settings', rankings:'Search rankings', overview:'Overview', competitors:'Competitors', insights:'Insights', report:'Weekly report', alerts:'Alerts', planner:'Planner', thumbnails:'Thumbnails'};
+  const titles = {nodes:'Nodes', database:'Database health', settings:'Settings', rankings:'Search rankings', overview:'Overview', competitors:'Competitors', insights:'Insights', report:'Weekly report', alerts:'Alerts', planner:'Planner', thumbnails:'Thumbnails', trends:'Google Trends', research:'Topic research'};
   const title = owner ? 'Competitors' : titles[page] ?? current?.name ?? 'Channel';
   const since = id => visits[id] ?? boot.current;
   const newVideos = (cs, t) => cs.reduce((n, c) => n + c.recent.filter(v => v.published > t).length, 0);
@@ -358,7 +360,7 @@ function App() {
   };
   const nav = (id, label, extra, count, hot) => { const f = fresh(id); return <button className="nav-item" aria-current={page === id ? 'page' : undefined} onClick={() => setPage(id)}>{extra}<span className="nav-text">{label}</span>{f ? <span className="fresh" title={f+' new since your last visit'}>+{f}</span> : null}{count ? <span className={'count'+(hot ? ' hot' : '')}>{count}</span> : null}</button>; };
   const paletteItems = !data ? [] : [
-    ...Object.entries({overview:'Overview', insights:'Insights', rankings:'Search rankings', report:'Weekly report', alerts:'Alerts', settings:'Settings', database:'Database health', nodes:'Nodes', planner:'Planner & lookup', thumbnails:'Thumbnails'}).map(([k, l]) => ({group:'Pages', label:l, run:() => setPage(k)})),
+    ...Object.entries({overview:'Overview', insights:'Insights', rankings:'Search rankings', report:'Weekly report', alerts:'Alerts', settings:'Settings', database:'Database health', nodes:'Nodes', planner:'Planner & lookup', thumbnails:'Thumbnails', trends:'Google Trends', research:'Topic research'}).map(([k, l]) => ({group:'Pages', label:l, run:() => setPage(k)})),
     ...own.map(c => ({group:'Your channels', label:c.name, hint:short(c.subscribers)+' subs', icon:<Avatar channel={c} size={20}/>, run:() => setPage('ch:'+c.id)})),
     ...own.map(c => ({group:'Your channels', label:c.name+' rivals', run:() => setPage('competitors:'+c.id)})),
     ...competitors.map(c => ({group:'Competitors', label:c.name, hint:c.rivalNames, icon:<Avatar channel={c} size={20}/>, run:() => setPage('ch:'+c.id)})),
@@ -381,6 +383,8 @@ function App() {
         {nav('overview', 'Overview', <span className="nav-icon"><Icon name="overview"/></span>)}
         {nav('insights', 'Insights', <span className="nav-icon"><Icon name="insights"/></span>)}
         {nav('thumbnails', 'Thumbnails', <span className="nav-icon"><Icon name="thumbnails"/></span>)}
+        {nav('trends', 'Trends', <span className="nav-icon"><Icon name="trends"/></span>)}
+        {nav('research', 'Topic research', <span className="nav-icon"><Icon name="search"/></span>)}{/* topic-research (RESEARCH.md) */}
         {nav('rankings', 'Rankings', <span className="nav-icon"><Icon name="rankings"/></span>, data?.rankings.categories.flatMap(c => c.subs).filter(s => s.status === 'weak' || s.status === 'missing').length, true)}
         {nav('report', 'Weekly report', <span className="nav-icon"><Icon name="report"/></span>)}
         {nav('alerts', 'Alerts', <span className="nav-icon"><Icon name="alerts"/></span>, data?.unread, true)}
@@ -422,6 +426,8 @@ function App() {
       {data && page === 'overview' && <Overview own={own} open={setPage} rail={<OverviewRail data={data} own={own} competitors={competitors} open={setPage} onRefresh={refresh} onSearch={() => setPalette(true)}/>}/>}
       {data && page === 'insights' && <Insights channels={data.channels}/>}
       {data && page === 'thumbnails' && <Thumbnails channels={data.channels}/>}
+      {data && page === 'trends' && <TrendsPage/>}
+      {data && page === 'research' && <ResearchPage own={own} onOpen={setPage}/>}{/* topic-research (RESEARCH.md) */}
       {data && page === 'settings' && <Settings data={data} call={call}/>}
       {data && page === 'database' && <DatabasePage/>}
       {data && page === 'nodes' && <NodesPage/>}
